@@ -1,0 +1,10 @@
+vault/
+.socialgraph/
+.env
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/

@@ -1,0 +1,37 @@
+[
+  {
+    "urn": "urn:li:activity:7458000000000000001",
+    "author": "Julien Chaumond",
+    "subtitle": "Co-founder at Hugging Face",
+    "date": "3d",
+    "content": "Excited to announce multi-token prediction support is now in llama.cpp! This significantly speeds up inference on consumer hardware. Try it out with --predict-multi-token flag."
+  },
+  {
+    "urn": "urn:li:activity:7458000000000000002",
+    "author": "Marcelo Rovai",
+    "subtitle": "Professor & AI Researcher",
+    "date": "1w",
+    "content": "Running Gemma4 on a Raspberry Pi 5 — full walkthrough on edge inference. The 4-bit quantized model fits in 6GB RAM and achieves 8 tokens/sec. Full tutorial: https://hackster.io/gemma4-rpi5"
+  },
+  {
+    "urn": "urn:li:activity:7458000000000000003",
+    "author": "Abhishek Veeramalla",
+    "subtitle": "Simplifying MLOps",
+    "date": "2d",
+    "content": "Kubernetes Day 2 operations checklist: node autoscaling, PodDisruptionBudgets, multi-cluster networking. Most teams skip PDBs and regret it during rolling deploys."
+  },
+  {
+    "urn": "urn:li:activity:7458000000000000004",
+    "author": "Swyx",
+    "subtitle": "Latent Space Podcast",
+    "date": "4d",
+    "content": "The open source AI stack is converging faster than I expected. vLLM, llama.cpp, and Ollama are all solving the same inference problem from different angles. Winner will be determined by ecosystem, not benchmarks."
+  },
+  {
+    "urn": "urn:li:activity:7458000000000000005",
+    "author": "Lior Ben David",
+    "subtitle": "AI Tools Curator",
+    "date": "5d",
+    "content": "10 open source tools that replaced paid SaaS for my team this year: Grafana (Datadog), Metabase (Tableau), n8n (Zapier), Minio (S3), Gitea (GitHub). Full list in comments."
+  }
+]
