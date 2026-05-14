@@ -8,3 +8,4 @@ dist/
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
+linkedin_saved_posts*.json
