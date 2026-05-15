@@ -34,7 +34,7 @@ class VaultWriteAgent:
         writer = VaultWriter(ctx.settings.obsidian_vault_path)
         result = await ctx.db.scalars(
             select(Post)
-            .where(Post.status == "graphed")
+            .where(Post.status.in_(["graphed", "ok"]))
             .options(
                 selectinload(Post.post_topics).selectinload(PostTopic.topic),
                 selectinload(Post.post_links).selectinload(PostExternalLink.external_link),
@@ -84,7 +84,7 @@ class VaultWriteAgent:
                     title=post.title,
                     summary=post.summary,
                 )
-                writer.write_post(post.urn, note_content)
+                writer.write_post(post.urn, note_content, platform=post.platform)
                 post.status = "ok"
                 processed += 1
             except Exception as exc:
@@ -121,11 +121,18 @@ class VaultWriteAgent:
             }
             topic_subtopic_posts.setdefault(primary, {}).setdefault(subtopic_name, []).append(entry)
 
-        # Write topic MOC files
+        # Write topic MOC files — grouped by platform
+        # Collect the platform for each topic from the posts that reference it
+        topic_platform: dict[str, str] = {}
+        for post in posts:
+            primary = _primary_topic(post)
+            if primary:
+                topic_platform.setdefault(primary, post.platform)
         topics_result = await ctx.db.scalars(select(Topic))
         all_topics = {t.name: t for t in topics_result.all()}
         for topic_name, subtopic_groups in topic_subtopic_posts.items():
             t = all_topics.get(topic_name)
+            platform = topic_platform.get(topic_name, "linkedin")
             try:
                 moc = render_topic_note(
                     name=topic_name,
@@ -133,7 +140,7 @@ class VaultWriteAgent:
                     subtopic_groups=subtopic_groups,
                     related_topics=[],
                 )
-                writer.write_topic(topic_name, moc)
+                writer.write_topic(topic_name, moc, platform=platform)
             except Exception as exc:
                 logger.warning("vault_write.topic_failed", topic=topic_name, error=str(exc))
 

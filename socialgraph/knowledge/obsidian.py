@@ -259,24 +259,40 @@ Topics: {len(topic_names)}
 
 
 class VaultWriter:
-    """Writes Obsidian vault files from graph/post data."""
+    """Writes Obsidian vault files from graph/post data.
+
+    Files are organised by platform so future sources (Twitter, Reddit, …)
+    live in their own subtrees:
+
+        {vault}/
+          linkedin/
+            posts/   post_<urn_tail>.md
+            topics/  <topic-slug>.md
+          _index.md
+    """
 
     def __init__(self, vault_path: Path) -> None:
         self._vault = vault_path
 
-    def write_post(self, urn: str, content: str) -> Path:
+    def _platform_dir(self, platform: str) -> Path:
+        return self._vault / platform.lower()
+
+    def write_post(self, urn: str, content: str, platform: str = "linkedin") -> Path:
         tail = _urn_tail(urn)
-        path = self._vault / "posts" / f"post_{tail}.md"
+        path = self._platform_dir(platform) / "posts" / f"post_{tail}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path
 
-    def write_topic(self, name: str, content: str) -> Path:
+    def write_topic(self, name: str, content: str, platform: str = "linkedin") -> Path:
         safe = _slug(name)
-        path = self._vault / "topics" / f"{safe}.md"
+        path = self._platform_dir(platform) / "topics" / f"{safe}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path
 
     def write_index(self, content: str) -> Path:
         path = self._vault / "_index.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path

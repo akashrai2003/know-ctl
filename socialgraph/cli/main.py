@@ -168,7 +168,17 @@ def scrape(
             for rp in raw_posts:
                 post, created = await repo.get_or_create_post(rp.urn, rp.platform)
                 if not created:
-                    skipped += 1
+                    # For reposts: update content if the new version is richer
+                    # (hydration combined original content — old DB entry had only the commentary)
+                    old_len = len(post.content or "")
+                    new_len = len(rp.content or "")
+                    if new_len > old_len + 20:
+                        post.author = rp.author
+                        post.content = rp.content
+                        post.source_url = rp.source_url
+                        processed += 1
+                    else:
+                        skipped += 1
                     continue
                 post.author = rp.author
                 post.subtitle = rp.subtitle
