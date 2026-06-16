@@ -38,13 +38,13 @@ ROUTING_TABLE: dict[str, TaskComplexity] = {
 
 
 class LLMRouter:
-    def __init__(self, batch_client: BatchLLMClient, groq_client: GroqClient) -> None:
+    def __init__(self, batch_client: BatchLLMClient, groq_client: GroqClient | None) -> None:
         self._batch = batch_client
         self._groq = groq_client
 
     def get_client(self, task: str) -> BatchLLMClient | GroqClient:
         complexity = ROUTING_TABLE.get(task, TaskComplexity.SMALL_SINGLE)
-        if complexity == TaskComplexity.LARGE:
+        if complexity == TaskComplexity.LARGE and self._groq is not None:
             return self._groq
         return self._batch
 

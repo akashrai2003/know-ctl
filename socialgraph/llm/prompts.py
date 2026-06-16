@@ -66,17 +66,38 @@ Return JSON:
 """
 
 SUMMARIZE_CONTENT_SYSTEM = """\
-You write concise summaries of web article content for a knowledge base.
-Respond with a single paragraph of 2–4 sentences. No headers. No lists."""
+You write rich, informative summaries of web content for a professional knowledge base.
+Respond with 3–5 sentences covering: what the resource is, its key ideas or findings, \
+and why it matters. No headers, no lists, no emojis. Plain prose only."""
 
 SUMMARIZE_CONTENT_USER = """\
 Title: {title}
 URL: {url}
 
-Content excerpt:
+Content:
 {excerpt}
 
-Write a 2–4 sentence summary of the key insight or information in this content.
+Write a 3–5 sentence summary covering the key ideas, findings, or value of this content.
+"""
+
+SUMMARIZE_COMMENT_LINK_SYSTEM = """\
+You write concise, insightful summaries of web resources for a professional knowledge base.
+A LinkedIn commenter shared a link — use their comment as context to understand *why* \
+they found it relevant. Respond with 2–3 sentences covering: what the resource is and \
+what makes it valuable in the context of the discussion. No headers, no lists, no emojis."""
+
+SUMMARIZE_COMMENT_LINK_USER = """\
+A LinkedIn commenter wrote:
+"{commenter_name}: {comment_text}"
+
+They linked to this resource:
+Title: {title}
+URL: {url}
+
+Article content:
+{excerpt}
+
+Write a 2–3 sentence summary of what makes this resource valuable, informed by why the commenter shared it.
 """
 
 GENERATE_POST_TITLE_SUBTOPIC_SYSTEM = """\

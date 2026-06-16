@@ -16,14 +16,24 @@ logger = structlog.get_logger(__name__)
 class IngestAgent:
     name = "ingest"
 
-    def __init__(self, json_path: Path) -> None:
+    def __init__(self, json_path: Path | None = None, live_mode: bool = False) -> None:
         self._json_path = json_path
+        self._live_mode = live_mode
 
     async def run(self, ctx: StageContext) -> StageOutput:
-        connector = LinkedInJSONConnector(self._json_path)
-        raw_posts: list[RawPost] = await connector.fetch_saved_posts()
-
         repo = Repo(ctx.db)
+        if self._live_mode:
+            from socialgraph.connectors.linkedin import LinkedInPlaywrightConnector
+            posts = await repo.get_all_posts()
+            already_known_urns = {p.urn for p in posts}
+            connector = LinkedInPlaywrightConnector(ctx.settings)
+            raw_posts: list[RawPost] = await connector.fetch_saved_posts(already_known_urns)
+        else:
+            if not self._json_path:
+                raise ValueError("json_path must be provided if live_mode is False")
+            connector = LinkedInJSONConnector(self._json_path)
+            raw_posts: list[RawPost] = await connector.fetch_saved_posts()
+
         processed = skipped = 0
 
         for rp in raw_posts:

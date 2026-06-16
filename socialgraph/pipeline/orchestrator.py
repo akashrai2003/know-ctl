@@ -14,7 +14,18 @@ from socialgraph.storage.repo import Repo
 
 logger = structlog.get_logger(__name__)
 
-STAGE_ORDER = ["ingest", "enrich", "classify", "graph_build", "vault_write"]
+STAGE_ORDER = [
+    "ingest",
+    "comments",
+    "comment_enrich",
+    "enrich",
+    "classify",
+    "embed",
+    "subtopic",
+    "semantic_edges",
+    "graph_build",
+    "vault_write",
+]
 
 
 @dataclass

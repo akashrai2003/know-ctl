@@ -20,6 +20,7 @@ dependencies = [
     "sqlalchemy>=2",
     "alembic>=1.13",
     "aiosqlite>=0.20",
+    "sqlite-vec",
 
     # LLM
     "openai>=1.30",
@@ -28,6 +29,7 @@ dependencies = [
 
     # Browser automation
     "playwright>=1.44",
+    "playwright-stealth",
 
     # Content extraction
     "trafilatura>=1.10",
@@ -45,6 +47,17 @@ dependencies = [
 
     # MCP (for optional Obsidian MCP integration in M2)
     "mcp>=1.0,<2.0",
+
+    # Local embeddings
+    "sentence-transformers",
+    "pillow>=9.1.0",
+
+    # Web UI & REST API (M7)
+    "fastapi>=0.111",
+    "uvicorn[standard]>=0.30",
+
+    # Scheduler (M6)
+    "apscheduler>=3.10",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +67,10 @@ dev = [
     "pytest-httpx>=0.30",
     "ruff>=0.4",
     "mypy>=1.10",
+]
+mcp-http = [
+    "uvicorn>=0.30",
+    "starlette>=0.40",
 ]
 
 [project.scripts]

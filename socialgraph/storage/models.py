@@ -33,6 +33,7 @@ class Post(Base):
     source_url: Mapped[str | None] = mapped_column(String(1024))
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     # stage tracking: pending → ingested → enriched → classified → graphed → ok
+    comments_fetched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
@@ -46,6 +47,9 @@ class Post(Base):
     comments: Mapped[list[Comment]] = relationship("Comment", back_populates="post")
     post_links: Mapped[list[PostExternalLink]] = relationship(
         "PostExternalLink", back_populates="post"
+    )
+    embedding: Mapped[Embedding | None] = relationship(
+        "Embedding", back_populates="post", uselist=False
     )
 
 
@@ -117,6 +121,7 @@ class ExternalLink(Base):
     title: Mapped[str | None] = mapped_column(String(1024))
     description: Mapped[str | None] = mapped_column(Text)
     body_excerpt: Mapped[str | None] = mapped_column(Text)
+    ai_summary: Mapped[str | None] = mapped_column(Text)
     content_type: Mapped[str] = mapped_column(String(32), nullable=False, default="article")
     fetch_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     error_reason: Mapped[str | None] = mapped_column(String(256))
@@ -139,6 +144,7 @@ class PostExternalLink(Base):
     external_link_id: Mapped[int] = mapped_column(ForeignKey("external_links.id"), nullable=False)
     context: Mapped[str] = mapped_column(String(32), nullable=False, default="body")
     # context: "body" | "comment"
+    comment_id: Mapped[int | None] = mapped_column(ForeignKey("comments.id"), nullable=True)
 
     post: Mapped[Post] = relationship("Post", back_populates="post_links")
     external_link: Mapped[ExternalLink] = relationship(
@@ -154,7 +160,12 @@ class Comment(Base):
     author: Mapped[str | None] = mapped_column(String(256))
     text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     has_external_url: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    urls_enriched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)  # ordering
+    # Nested-comment fields — populated when using the Voyager API scraper
+    is_reply: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    comment_urn: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    parent_comment_urn: Mapped[str | None] = mapped_column(String(512), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
 
     post: Mapped[Post] = relationship("Post", back_populates="comments")
@@ -228,3 +239,20 @@ class StageCheckpoint(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     run: Mapped[PipelineRun] = relationship("PipelineRun", back_populates="checkpoints")
+
+
+class Embedding(Base):
+    """Stores post embedding vectors as JSON float arrays."""
+
+    __tablename__ = "embeddings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(
+        ForeignKey("posts.id"), unique=True, nullable=False, index=True
+    )
+    vector_json: Mapped[str] = mapped_column(Text, nullable=False)
+    model: Mapped[str] = mapped_column(String(256), nullable=False, default="")
+    dim: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+
+    post: Mapped[Post] = relationship("Post", back_populates="embedding")

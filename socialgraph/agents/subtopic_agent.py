@@ -21,7 +21,7 @@ from socialgraph.llm.prompts import (
     MERGE_SUBTOPICS_USER,
 )
 from socialgraph.llm.router import LLMRouter
-from socialgraph.storage.models import Post, PostSubtopic, PostTopic, Topic
+from socialgraph.storage.models import Post, PostSubtopic, PostTopic
 from socialgraph.storage.repo import Repo
 
 logger = structlog.get_logger(__name__)
@@ -65,10 +65,12 @@ def _build_message(post: Post, topic_name: str, existing_subtopics: list[str]) -
 
 
 def _primary_topic(post: Post) -> PostTopic | None:
-    """Return the PostTopic with the highest confidence_score for this post."""
+    """Return the PostTopic with the highest confidence_score for this post, breaking ties alphabetically by topic name."""
     if not post.post_topics:
         return None
-    return max(post.post_topics, key=lambda pt: pt.confidence_score)
+    # Sort descending by confidence_score and ascending by topic name
+    sorted_pts = sorted(post.post_topics, key=lambda pt: (-pt.confidence_score, pt.topic.name))
+    return sorted_pts[0]
 
 
 class SubtopicAgent:
@@ -87,6 +89,7 @@ class SubtopicAgent:
             .where(Post.status.in_(["classified", "graphed", "ok"]))
             .options(
                 selectinload(Post.post_topics).selectinload(PostTopic.topic),
+                selectinload(Post.post_subtopics),
             )
         )
         posts = list(result.all())
@@ -96,13 +99,13 @@ class SubtopicAgent:
 
         repo = Repo(ctx.db)
 
-        # Group posts by primary topic
+        # Group posts by ALL their topics (not just primary) so every topic
+        # gets subtopic coverage, even if a post has multiple equal-confidence topics.
         topic_groups: dict[str, list[Post]] = {}
         topic_id_map: dict[str, int] = {}
 
         for post in posts:
-            pt = _primary_topic(post)
-            if pt:
+            for pt in post.post_topics:
                 topic_name = pt.topic.name
                 topic_groups.setdefault(topic_name, []).append(post)
                 topic_id_map[topic_name] = pt.topic_id
@@ -111,13 +114,36 @@ class SubtopicAgent:
 
         for topic_name, topic_posts in topic_groups.items():
             topic_id = topic_id_map[topic_name]
-            existing_subtopics: list[str] = []
+
+            # Seed existing_subtopics from DB so incremental runs stay consistent
+            existing_subtopics_result = await ctx.db.scalars(
+                select(PostSubtopic.subtopic_name)
+                .where(PostSubtopic.topic_id == topic_id)
+                .distinct()
+            )
+            existing_subtopics: list[str] = list(existing_subtopics_result.all())
+
+            # Only process posts that haven't been assigned a subtopic for this topic yet
+            posts_needing_subtopic = [
+                p for p in topic_posts
+                if not any(ps.topic_id == topic_id for ps in p.post_subtopics)
+            ]
+            if not posts_needing_subtopic:
+                logger.debug(
+                    "subtopic.topic_already_complete",
+                    topic=topic_name,
+                    existing_count=len(existing_subtopics),
+                )
+                continue
 
             logger.info(
                 "subtopic.processing_topic",
                 topic=topic_name,
-                post_count=len(topic_posts),
+                total_posts=len(topic_posts),
+                new_posts=len(posts_needing_subtopic),
+                existing_subtopics=len(existing_subtopics),
             )
+            topic_posts = posts_needing_subtopic
 
             # ── Bootstrap: first min(5, N) posts ────────────────────────
             bootstrap = topic_posts[: _BOOTSTRAP_SIZE]

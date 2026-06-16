@@ -39,10 +39,22 @@ class ClassifyAgent:
         self._taxonomy = taxonomy
 
     async def run(self, ctx: StageContext) -> StageOutput:
+
         result = await ctx.db.scalars(
             select(Post).where(Post.status.in_(["enriched", "ingested"]))
         )
         posts = list(result.all())
+
+        # Also reclassify posts that already completed the pipeline but have no topics
+        unclassified_result = await ctx.db.scalars(
+            select(Post)
+            .where(Post.status.in_(["ok", "graphed"]))
+            .where(~Post.post_topics.any())
+        )
+        unclassified_posts = list(unclassified_result.all())
+        # Track which ones were previously done so we can reset their status
+        needs_regraph: set[int] = {p.id for p in unclassified_posts}
+        posts = posts + unclassified_posts
 
         if not posts:
             return StageOutput(stage=self.name, skipped=1, meta={"reason": "no classifiable posts"})
@@ -72,11 +84,13 @@ class ClassifyAgent:
             for post, res in zip(batch, results, strict=False):
                 try:
                     await _apply_classification(post, res, repo, self._taxonomy, self._router)
+                    # Reset previously-completed posts back to classified so graph_build re-runs
                     post.status = "classified"
                     processed += 1
                 except Exception as exc:
                     logger.error("classify.post_failed", urn=post.urn, error=str(exc))
-                    post.status = "failed"
+                    if post.id not in needs_regraph:
+                        post.status = "failed"
                     failed += 1
 
         await ctx.db.commit()

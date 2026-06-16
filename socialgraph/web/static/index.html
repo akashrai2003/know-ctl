@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Social Graph — Knowledge Dashboard</title>
+  <meta name="description" content="Browse, search and visualize your LinkedIn knowledge graph — topics, authors, posts and semantic connections.">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Navbar -->
+    <nav class="navbar" id="navbar">
+      <div class="navbar-inner">
+        <a class="navbar-brand" href="#/" id="nav-brand">
+          <span class="brand-icon">⬡</span>
+          <span>Social Graph</span>
+        </a>
+        <ul class="navbar-links" id="nav-links">
+          <li><a href="#/" data-page="home">Home</a></li>
+          <li><a href="#/topics" data-page="topics">Topics</a></li>
+          <li><a href="#/authors" data-page="authors">Authors</a></li>
+          <li><a href="#/graph" data-page="graph">Graph</a></li>
+        </ul>
+        <div class="navbar-search">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="search-input" placeholder="Search posts..." autocomplete="off">
+        </div>
+      </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main-content" id="app"></main>
+  </div>
+
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="/static/graph.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>

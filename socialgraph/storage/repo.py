@@ -3,10 +3,13 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from socialgraph.storage.models import (
     Author,
+    Comment,
+    Embedding,
     ExternalLink,
     GraphEdge,
     GraphNode,
@@ -70,12 +73,16 @@ class Repo:
     # ── ExternalLink ──────────────────────────────────────────────────────
 
     async def get_or_create_external_link(self, url: str) -> tuple[ExternalLink, bool]:
+        # Check first (fast path for existing rows)
         existing = await self._s.scalar(select(ExternalLink).where(ExternalLink.url == url))
         if existing:
             return existing, False
-        link = ExternalLink(url=url, fetch_status="pending")
-        self._s.add(link)
+        # INSERT OR IGNORE avoids UNIQUE violations when concurrent tasks race on the same URL
+        stmt = sqlite_insert(ExternalLink).values(url=url, fetch_status="pending")
+        stmt = stmt.on_conflict_do_nothing(index_elements=["url"])
+        await self._s.execute(stmt)
         await self._s.flush()
+        link = await self._s.scalar(select(ExternalLink).where(ExternalLink.url == url))
         return link, True
 
     async def get_pending_links(self) -> list[ExternalLink]:
@@ -273,3 +280,116 @@ class Repo:
         self._s.add(pel)
         await self._s.flush()
         return pel
+
+    async def link_comment_url(
+        self, post_id: int, external_link_id: int, comment_id: int
+    ) -> PostExternalLink | None:
+        """Link a URL sourced from a comment to the post.
+
+        Returns None (without inserting) if the URL is already linked to this
+        post from any source — avoids duplicating links already captured from
+        the post body.
+        """
+        existing = await self._s.scalar(
+            select(PostExternalLink).where(
+                PostExternalLink.post_id == post_id,
+                PostExternalLink.external_link_id == external_link_id,
+            )
+        )
+        if existing:
+            return None
+        pel = PostExternalLink(
+            post_id=post_id,
+            external_link_id=external_link_id,
+            context="comment",
+            comment_id=comment_id,
+        )
+        self._s.add(pel)
+        await self._s.flush()
+        return pel
+
+    # ── Comment ───────────────────────────────────────────────────────────
+
+    async def get_posts_needing_comments(self, limit: int = 0) -> list[Post]:
+        q = select(Post).where(
+            Post.comments_fetched == False,  # noqa: E712
+            Post.status.in_(["ok", "graphed", "enriched", "classified"]),
+        )
+        if limit:
+            q = q.limit(limit)
+        result = await self._s.scalars(q)
+        return list(result.all())
+
+    async def bulk_insert_comments(
+        self, post_id: int, comments: list[dict]
+    ) -> int:
+        """Insert comments for a post; skip if post already has comments with matching rank."""
+        existing_ranks = set(
+            await self._s.scalars(
+                select(Comment.rank).where(Comment.post_id == post_id)
+            )
+        )
+        added = 0
+        for rank, c in enumerate(comments):
+            if rank in existing_ranks:
+                continue
+            obj = Comment(
+                post_id=post_id,
+                author=c.get("author"),
+                text=c.get("text", ""),
+                has_external_url=bool(c.get("has_external_url", False)),
+                rank=rank,
+                is_reply=bool(c.get("is_reply", False)),
+                comment_urn=c.get("comment_urn") or None,
+                parent_comment_urn=c.get("parent_comment_urn") or None,
+                created_at=datetime.utcnow(),
+            )
+            self._s.add(obj)
+            added += 1
+        await self._s.flush()
+        return added
+
+    async def delete_comments_for_post(self, post_id: int) -> int:
+        """Delete all comments for a post (used by --force re-scrape). Returns count deleted."""
+        from sqlalchemy import delete as sql_delete
+        result = await self._s.execute(
+            sql_delete(Comment).where(Comment.post_id == post_id)
+        )
+        await self._s.flush()
+        return result.rowcount
+
+    # ── Embedding ─────────────────────────────────────────────────────────
+
+    async def upsert_embedding(
+        self, post_id: int, vector_json: str, model: str, dim: int
+    ) -> Embedding:
+        existing = await self._s.scalar(
+            select(Embedding).where(Embedding.post_id == post_id)
+        )
+        if existing:
+            existing.vector_json = vector_json
+            existing.model = model
+            existing.dim = dim
+            return existing
+        emb = Embedding(
+            post_id=post_id,
+            vector_json=vector_json,
+            model=model,
+            dim=dim,
+            created_at=datetime.utcnow(),
+        )
+        self._s.add(emb)
+        await self._s.flush()
+        return emb
+
+    async def get_all_embeddings(self) -> list[Embedding]:
+        result = await self._s.scalars(select(Embedding))
+        return list(result.all())
+
+    async def get_posts_without_embeddings(self) -> list[Post]:
+        """Return posts that have no Embedding row yet."""
+        subq = select(Embedding.post_id)
+        result = await self._s.scalars(
+            select(Post).where(Post.id.not_in(subq))
+        )
+        return list(result.all())

@@ -25,6 +25,16 @@ class Settings(BaseSettings):
     batch_size: int = Field(default=10, ge=1, le=50)
     llm_timeout: float = Field(default=580.0, gt=0)
 
+    # ── Embeddings ───────────────────────────────────────────────────────
+    embedding_model: str = Field(
+        default="Qwen/Qwen3-Embedding-0.6B",
+        description="Model to use for local embeddings.",
+    )
+    embedding_device: str = Field(
+        default="cuda",
+        description="Device to load local embedding model on ('cuda' or 'cpu').",
+    )
+
     # ── Groq (large model) ──────────────────────────────────────────────
     groq_api_key: str = Field(default="")
     groq_model: str = Field(default="llama-3.3-70b-versatile")
@@ -50,6 +60,12 @@ class Settings(BaseSettings):
     # ── Pipeline knobs ───────────────────────────────────────────────────
     max_comments: int = Field(default=5, ge=0)
     log_level: str = Field(default="INFO")
+
+    # ── Web UI (M7) ──────────────────────────────────────────────────────
+    web_port: int = Field(default=8080, ge=1, le=65535)
+
+    # ── Scheduler (M6) ───────────────────────────────────────────────────
+    schedule_interval_hours: float = Field(default=6.0, gt=0)
 
     @field_validator("vllm_batch_url", mode="after")
     @classmethod

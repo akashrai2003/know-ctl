@@ -93,11 +93,12 @@ class LinkedInPlaywrightConnector:
     def __init__(self, settings: Any) -> None:
         self._settings = settings
 
-    async def fetch_saved_posts(self) -> list[RawPost]:
+    async def fetch_saved_posts(self, already_known_urns: set[str] | None = None) -> list[RawPost]:
         from socialgraph.browser.playwright_client import PlaywrightClient
 
+        known_list = list(already_known_urns) if already_known_urns else None
         async with PlaywrightClient(self._settings) as client:
-            raw: list[dict] = await client.fetch_saved_posts()
+            raw: list[dict] = await client.fetch_saved_posts(known_list)
 
         posts: list[RawPost] = []
         seen: set[str] = set()
