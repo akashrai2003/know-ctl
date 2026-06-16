@@ -8,16 +8,9 @@ from typing import Any
 import httpx
 import structlog
 
+from socialgraph.utils import msg_preview as _msg_preview
+
 logger = structlog.get_logger(__name__)
-
-
-def _msg_preview(messages: list[dict], max_chars: int = 300) -> str:
-    """Return a short preview of the last user message for log context."""
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            content = msg.get("content", "")
-            return content[:max_chars] + ("…" if len(content) > max_chars else "")
-    return ""
 
 
 class BatchLLMClient:
@@ -35,6 +28,17 @@ class BatchLLMClient:
         temperature: float = 0.0,
         max_tokens: int | None = None,
     ) -> list[Any | None]:
+        """Perform a batch completion request via the vLLM server.
+
+        Args:
+            messages_list: List of lists of chat messages (one list of messages per request).
+            response_format: Optional OpenAI-compatible response format dictionary (e.g. for JSON).
+            temperature: Sampling temperature (defaults to 0.0).
+            max_tokens: Optional limit on the number of generated tokens.
+
+        Returns:
+            A list containing parsed responses (dict, string, or None if failed).
+        """
         if not messages_list:
             return []
         payload: dict = {
@@ -108,11 +112,32 @@ class BatchLLMClient:
         response_format: dict | None = None,
         temperature: float = 0.0,
     ) -> Any | None:
+        """Perform a single completion request wrapped as a size-1 batch request.
+
+        Args:
+            messages: List of chat messages representing a single conversation.
+            response_format: Optional OpenAI-compatible response format dictionary.
+            temperature: Sampling temperature (defaults to 0.0).
+
+        Returns:
+            Parsed response (dict or string) or None if failed.
+        """
         results = await self.batch_chat([messages], response_format, temperature)
         return results[0] if results else None
 
     @staticmethod
     def _repair_json(raw: str, index: int) -> dict | None:
+        """Attempt to repair common JSON syntax issues from LLM outputs.
+
+        Handles trailing commas and extracts JSON blocks if there is surrounding text.
+
+        Args:
+            raw: Raw LLM response string.
+            index: Batch choice index (for logging purposes).
+
+        Returns:
+            A parsed dictionary, or None if repair attempts failed.
+        """
         if not raw:
             return None
         try:

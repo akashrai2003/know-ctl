@@ -1,4 +1,5 @@
 """Graph build agent: create graph nodes/edges from classified posts."""
+
 from __future__ import annotations
 
 import structlog
@@ -8,6 +9,7 @@ from sqlalchemy.orm import selectinload
 from socialgraph.agents.base import StageContext, StageOutput
 from socialgraph.knowledge.graph import GraphBuilder
 from socialgraph.knowledge.obsidian import _slug, _urn_tail
+from socialgraph.storage.enums import PostStatus
 from socialgraph.storage.models import GraphNode, Post, PostTopic, Topic
 from socialgraph.storage.repo import Repo
 
@@ -20,7 +22,7 @@ class GraphBuildAgent:
     async def run(self, ctx: StageContext) -> StageOutput:
         result = await ctx.db.scalars(
             select(Post)
-            .where(Post.status == "classified")
+            .where(Post.status == PostStatus.CLASSIFIED.value)
             .options(selectinload(Post.post_topics).selectinload(PostTopic.topic))
         )
         posts = list(result.all())
@@ -61,7 +63,7 @@ class GraphBuildAgent:
                         confidence_tag=pt.confidence_tag,
                     )
 
-            post.status = "graphed"
+            post.status = PostStatus.GRAPHED.value
             processed += 1
 
         await ctx.db.commit()

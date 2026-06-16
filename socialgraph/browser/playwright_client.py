@@ -1,4 +1,5 @@
 """Playwright-based browser automation for LinkedIn saved posts refresh."""
+
 from __future__ import annotations
 
 import asyncio
@@ -7,6 +8,7 @@ import pathlib
 from typing import Any
 
 import structlog
+from playwright.async_api import Browser, BrowserContext, Playwright
 
 from socialgraph.browser.comments_page import CommentsPage
 from socialgraph.browser.login_page import LinkedInLoginPage
@@ -28,6 +30,9 @@ class PlaywrightClient:
     """Context manager wrapping a Playwright browser for LinkedIn automation."""
 
     _STATE_PATH = ".socialgraph/linkedin_state.json"
+    _pw: Playwright | None
+    _browser: Browser | None
+    _context: BrowserContext | None
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -62,7 +67,7 @@ class PlaywrightClient:
 
     async def fetch_saved_posts(self, known_urns: list[str] | None = None) -> list[dict]:
         """Log in, navigate to saved posts, and extract via injected JS.
-        
+
         If the saved session state is stale and results in an extraction failure,
         this will automatically clear the state file and retry with a fresh login.
         """
@@ -76,14 +81,14 @@ class PlaywrightClient:
                 logger.warning("linkedin.session_stale_clearing_state", error=str(e))
                 with contextlib.suppress(Exception):
                     state_file.unlink()
-                
+
                 # Stop and restart session manager to clear cookies/context
                 await self._session_manager.stop()
                 await self._session_manager.start()
                 self._pw = self._session_manager.pw
                 self._browser = self._session_manager.browser
                 self._context = self._session_manager.context
-                
+
                 logger.info("linkedin.retrying_with_fresh_login")
                 page = await self.login_linkedin()
                 saved_posts_page = SavedPostsPage(page, self._settings, EXTRACT_SAVED_POSTS_JS)
@@ -91,7 +96,9 @@ class PlaywrightClient:
             else:
                 raise
 
-    async def fetch_comments_batch(self, urns: list[str], max_per_post: int = 50) -> dict[str, list[dict]]:
+    async def fetch_comments_batch(
+        self, urns: list[str], max_per_post: int = 50
+    ) -> dict[str, list[dict]]:
         """Fetch top-level comments and nested replies for each URN by visiting
         each post page and expanding reply threads via DOM interaction.
 

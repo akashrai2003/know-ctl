@@ -1,7 +1,9 @@
+"""SQLAlchemy ORM models for the Social Graph database schema."""
+
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -15,12 +17,23 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from socialgraph.storage.enums import FetchStatus, PostStatus
+
+UTC = timezone.utc
+
+
+def _utc_now() -> datetime:
+    """Return a timezone-aware UTC datetime for column defaults."""
+    return datetime.now(UTC)
+
 
 class Base(DeclarativeBase):
-    pass
+    """Shared declarative base for all ORM models."""
 
 
 class Post(Base):
+    """A saved social media post (e.g. from LinkedIn)."""
+
     __tablename__ = "posts"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -31,12 +44,14 @@ class Post(Base):
     date_raw: Mapped[str | None] = mapped_column(String(128))
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     source_url: Mapped[str | None] = mapped_column(String(1024))
-    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=PostStatus.PENDING.value
+    )
     # stage tracking: pending → ingested → enriched → classified → graphed → ok
     comments_fetched: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow
+        DateTime, nullable=False, default=_utc_now, onupdate=_utc_now
     )
 
     title: Mapped[str | None] = mapped_column(Text)
@@ -54,13 +69,15 @@ class Post(Base):
 
 
 class Topic(Base):
+    """A canonical topic in the knowledge taxonomy."""
+
     __tablename__ = "topics"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     aliases_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
     @property
     def aliases(self) -> list[str]:
@@ -74,6 +91,8 @@ class Topic(Base):
 
 
 class PostSubtopic(Base):
+    """Maps a post to a subtopic within a parent topic."""
+
     __tablename__ = "post_subtopics"
     __table_args__ = (UniqueConstraint("post_id", "topic_id", name="uq_post_subtopic"),)
 
@@ -81,13 +100,15 @@ class PostSubtopic(Base):
     post_id: Mapped[int] = mapped_column(ForeignKey("posts.id"), nullable=False)
     topic_id: Mapped[int] = mapped_column(ForeignKey("topics.id"), nullable=False)
     subtopic_name: Mapped[str] = mapped_column(String(256), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
     post: Mapped[Post] = relationship("Post", back_populates="post_subtopics")
     topic: Mapped[Topic] = relationship("Topic")
 
 
 class PostTopic(Base):
+    """Many-to-many association between posts and topics with confidence score."""
+
     __tablename__ = "post_topics"
     __table_args__ = (UniqueConstraint("post_id", "topic_id"),)
 
@@ -102,6 +123,8 @@ class PostTopic(Base):
 
 
 class Author(Base):
+    """Aggregated author profile derived from posts."""
+
     __tablename__ = "authors"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -110,10 +133,12 @@ class Author(Base):
     subtitle: Mapped[str | None] = mapped_column(String(512))
     platform: Mapped[str] = mapped_column(String(32), nullable=False, default="linkedin")
     post_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
 
 class ExternalLink(Base):
+    """An external URL referenced in a post or comment."""
+
     __tablename__ = "external_links"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -123,10 +148,12 @@ class ExternalLink(Base):
     body_excerpt: Mapped[str | None] = mapped_column(Text)
     ai_summary: Mapped[str | None] = mapped_column(Text)
     content_type: Mapped[str] = mapped_column(String(32), nullable=False, default="article")
-    fetch_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    fetch_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=FetchStatus.PENDING.value
+    )
     error_reason: Mapped[str | None] = mapped_column(String(256))
     fetched_at: Mapped[datetime | None] = mapped_column(DateTime)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
     post_links: Mapped[list[PostExternalLink]] = relationship(
         "PostExternalLink", back_populates="external_link"
@@ -147,12 +174,12 @@ class PostExternalLink(Base):
     comment_id: Mapped[int | None] = mapped_column(ForeignKey("comments.id"), nullable=True)
 
     post: Mapped[Post] = relationship("Post", back_populates="post_links")
-    external_link: Mapped[ExternalLink] = relationship(
-        "ExternalLink", back_populates="post_links"
-    )
+    external_link: Mapped[ExternalLink] = relationship("ExternalLink", back_populates="post_links")
 
 
 class Comment(Base):
+    """A comment on a post, scraped from LinkedIn."""
+
     __tablename__ = "comments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -166,12 +193,14 @@ class Comment(Base):
     is_reply: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     comment_urn: Mapped[str | None] = mapped_column(String(512), nullable=True)
     parent_comment_urn: Mapped[str | None] = mapped_column(String(512), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
     post: Mapped[Post] = relationship("Post", back_populates="comments")
 
 
 class GraphNode(Base):
+    """A node in the knowledge graph (post or topic)."""
+
     __tablename__ = "graph_nodes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -180,7 +209,7 @@ class GraphNode(Base):
     label: Mapped[str] = mapped_column(String(512), nullable=False)
     community: Mapped[str | None] = mapped_column(String(128))
     meta_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
     out_edges: Mapped[list[GraphEdge]] = relationship(
         "GraphEdge", foreign_keys="GraphEdge.source_node_id", back_populates="source_node"
@@ -191,6 +220,8 @@ class GraphNode(Base):
 
 
 class GraphEdge(Base):
+    """A directed edge in the knowledge graph."""
+
     __tablename__ = "graph_edges"
     __table_args__ = (UniqueConstraint("source_node_id", "target_node_id", "relation"),)
 
@@ -210,13 +241,15 @@ class GraphEdge(Base):
 
 
 class PipelineRun(Base):
+    """Record of a single pipeline execution."""
+
     __tablename__ = "pipeline_runs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     run_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="running")
     stage_counts_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     checkpoints: Mapped[list[StageCheckpoint]] = relationship(
@@ -225,6 +258,8 @@ class PipelineRun(Base):
 
 
 class StageCheckpoint(Base):
+    """Checkpoint record for idempotent stage re-runs."""
+
     __tablename__ = "stage_checkpoints"
     __table_args__ = (UniqueConstraint("run_id", "stage", "input_hash"),)
 
@@ -253,6 +288,6 @@ class Embedding(Base):
     vector_json: Mapped[str] = mapped_column(Text, nullable=False)
     model: Mapped[str] = mapped_column(String(256), nullable=False, default="")
     dim: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
     post: Mapped[Post] = relationship("Post", back_populates="embedding")

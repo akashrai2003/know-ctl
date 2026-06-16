@@ -1,4 +1,5 @@
 """Prompt templates for LLM tasks."""
+
 from __future__ import annotations
 
 CLASSIFY_POST_TOPICS_SYSTEM = """\

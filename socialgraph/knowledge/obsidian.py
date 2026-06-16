@@ -7,6 +7,9 @@ from typing import Any
 
 import structlog
 
+from socialgraph.utils import slugify as _slug
+from socialgraph.utils import urn_tail as _urn_tail
+
 logger = structlog.get_logger(__name__)
 
 
@@ -45,18 +48,6 @@ def _yaml_str(s: Any) -> str:
         else:
             out.append(ch)
     return "".join(out)
-
-
-def _slug(text: str) -> str:
-    """Convert a string to a safe filesystem slug."""
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9]+", "_", text)
-    return text.strip("_")[:80]
-
-
-def _urn_tail(urn: str) -> str:
-    """Extract the numeric ID from a URN like urn:li:activity:7458137957485699072."""
-    return urn.split(":")[-1]
 
 
 def _clean_date(date_raw: str | None) -> str:
@@ -219,8 +210,7 @@ tags:
     # Comments section — show top notable comments (those with a URL or long text)
     if comments:
         notable = [
-            c for c in comments
-            if c.get("has_external_url") or len(c.get("text", "")) > 100
+            c for c in comments if c.get("has_external_url") or len(c.get("text", "")) > 100
         ][:3]
         if notable:
             body += "\n## Comments\n"
@@ -323,9 +313,7 @@ def render_topic_note(
     direct_entries: list[dict] = []
     for subtopic_name, entries in sorted(subtopic_groups.items()):
         if subtopic_name:
-            subtopic_lines.append(
-                f"- {subtopic_name} — {len(entries)} posts"
-            )
+            subtopic_lines.append(f"- {subtopic_name} — {len(entries)} posts")
         else:
             direct_entries = entries  # posts with no subtopic
 
@@ -392,7 +380,7 @@ Topics: {len(topic_names)}
 
 def render_author_note(
     name: str,
-    slug: str,
+    _author_slug: str,
     subtitle: str | None,
     platform: str,
     post_count: int,
@@ -504,11 +492,7 @@ class VaultWriter:
     def write_subtopic(
         self, topic_slug: str, subtopic_slug: str, content: str, platform: str = "linkedin"
     ) -> Path:
-        path = (
-            self._platform_dir(platform)
-            / "subtopics"
-            / f"{topic_slug}__{subtopic_slug}.md"
-        )
+        path = self._platform_dir(platform) / "subtopics" / f"{topic_slug}__{subtopic_slug}.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path

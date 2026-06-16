@@ -1,9 +1,10 @@
 """Unit tests for obsidian note rendering."""
+
 from __future__ import annotations
 
 from datetime import datetime
 
-from socialgraph.knowledge.obsidian import render_post_note, render_topic_note
+from socialgraph.knowledge.obsidian import render_author_note, render_post_note, render_topic_note
 
 
 def test_post_note_contains_urn():
@@ -32,7 +33,7 @@ def test_post_note_no_injection():
     content = render_post_note(
         urn="urn:li:activity:999",
         platform="linkedin",
-        author='Evil\nauthor_override: injected',
+        author="Evil\nauthor_override: injected",
         subtitle=None,
         date_raw=None,
         content="Normal content",
@@ -55,9 +56,15 @@ def test_topic_note_contains_posts():
     content = render_topic_note(
         name="Local LLMs",
         description="Self-hosted LLMs",
-        post_entries=[
-            {"urn": "urn:li:activity:111", "author": "Jane", "content": "Some post about llama.cpp"},
-        ],
+        subtopic_groups={
+            "": [
+                {
+                    "urn": "urn:li:activity:111",
+                    "author": "Jane",
+                    "content": "Some post about llama.cpp",
+                },
+            ]
+        },
         related_topics=["Edge AI"],
     )
     assert "Local LLMs" in content
@@ -69,7 +76,39 @@ def test_topic_note_post_count():
     content = render_topic_note(
         name="Kubernetes",
         description="Container orchestration",
-        post_entries=[{"urn": f"urn:li:activity:{i}", "author": "A", "content": "k8s"} for i in range(5)],
+        subtopic_groups={
+            "": [{"urn": f"urn:li:activity:{i}", "author": "A", "content": "k8s"} for i in range(5)]
+        },
         related_topics=[],
     )
     assert "5 posts" in content
+
+
+def test_render_author_note():
+    content = render_author_note(
+        name="Jane Doe",
+        _author_slug="jane_doe",
+        subtitle="Software Architect",
+        platform="linkedin",
+        post_count=2,
+        topics_with_counts=[("AI/ML", 2)],
+        posts=[
+            {
+                "urn": "urn:li:activity:001",
+                "title": "First post",
+                "date_raw": "1d",
+                "content": "hello ml",
+            },
+            {
+                "urn": "urn:li:activity:002",
+                "title": "Second post",
+                "date_raw": "2d",
+                "content": "more ml",
+            },
+        ],
+    )
+    assert "Jane Doe" in content
+    assert "Software Architect" in content
+    assert "First post" in content
+    assert "Second post" in content
+    assert "[[ai_ml|AI/ML]] (2 posts)" in content

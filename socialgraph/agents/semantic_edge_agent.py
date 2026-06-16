@@ -1,4 +1,5 @@
 """Semantic edge agent: create GraphEdge rows for post pairs with high embedding similarity."""
+
 from __future__ import annotations
 
 import structlog
@@ -32,9 +33,7 @@ class SemanticEdgeAgent:
             )
 
         # Map post_id → GraphNode
-        node_result = await ctx.db.scalars(
-            select(GraphNode).where(GraphNode.node_type == "post")
-        )
+        node_result = await ctx.db.scalars(select(GraphNode).where(GraphNode.node_type == "post"))
         nodes = {n.node_id: n for n in node_result.all()}
 
         # Build post_id → node_db_id map

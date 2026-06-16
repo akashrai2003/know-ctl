@@ -2,7 +2,10 @@
 
 Runs all pipeline stages sequentially, only processing posts not yet completed at each stage.
 """
+
 from __future__ import annotations
+
+from typing import Any
 
 import structlog
 
@@ -27,6 +30,7 @@ def _get_router(settings: Settings):
     from socialgraph.llm.large_client import GroqClient
     from socialgraph.llm.router import LLMRouter
     from socialgraph.llm.small_client import BatchLLMClient
+
     batch = BatchLLMClient(
         batch_url=settings.vllm_batch_url,
         model=settings.vllm_model,
@@ -45,12 +49,13 @@ def _get_router(settings: Settings):
 
 def _get_taxonomy(settings: Settings):
     from socialgraph.knowledge.taxonomy import Taxonomy
+
     if settings.taxonomy_path.exists():
         return Taxonomy.from_file(settings.taxonomy_path)
     return None
 
 
-async def run_incremental_pipeline(settings: Settings) -> dict[str, any]:
+async def run_incremental_pipeline(settings: Settings) -> dict[str, Any]:
     """Run all pipeline stages in sequence.
 
     Each stage operates incrementally by querying the database for only the unprocessed posts.
@@ -64,14 +69,16 @@ async def run_incremental_pipeline(settings: Settings) -> dict[str, any]:
         ctx = StageContext(run_id="scheduler-ingest", settings=settings, db=session, stage="ingest")
         ingest_agent = IngestAgent(live_mode=True)
         ingest_out = await ingest_agent.run(ctx)
-    
+
     posts_ingested = ingest_out.processed
     logger.info("incremental_pipeline.stage_done", stage="ingest", processed=posts_ingested)
 
     # 2. Comments stage
     logger.info("incremental_pipeline.stage", stage="comments")
     async with get_session(factory) as session:
-        ctx = StageContext(run_id="scheduler-comments", settings=settings, db=session, stage="comments")
+        ctx = StageContext(
+            run_id="scheduler-comments", settings=settings, db=session, stage="comments"
+        )
         comment_agent = CommentAgent(max_per_post=settings.max_comments)
         await comment_agent.run(ctx)
 
@@ -82,7 +89,9 @@ async def run_incremental_pipeline(settings: Settings) -> dict[str, any]:
     # 3. Comment enrichment stage
     logger.info("incremental_pipeline.stage", stage="comment_enrich")
     async with get_session(factory) as session:
-        ctx = StageContext(run_id="scheduler-comment-enrich", settings=settings, db=session, stage="comment_enrich")
+        ctx = StageContext(
+            run_id="scheduler-comment-enrich", settings=settings, db=session, stage="comment_enrich"
+        )
         comment_enrich_agent = CommentEnrichAgent(router=router)
         await comment_enrich_agent.run(ctx)
 
@@ -97,7 +106,9 @@ async def run_incremental_pipeline(settings: Settings) -> dict[str, any]:
     logger.info("incremental_pipeline.stage", stage="classify")
     if taxonomy:
         async with get_session(factory) as session:
-            ctx = StageContext(run_id="scheduler-classify", settings=settings, db=session, stage="classify")
+            ctx = StageContext(
+                run_id="scheduler-classify", settings=settings, db=session, stage="classify"
+            )
             classify_agent = ClassifyAgent(router=router, taxonomy=taxonomy)
             await classify_agent.run(ctx)
     else:
@@ -113,28 +124,36 @@ async def run_incremental_pipeline(settings: Settings) -> dict[str, any]:
     # 7. Subtopic generation stage
     logger.info("incremental_pipeline.stage", stage="subtopic")
     async with get_session(factory) as session:
-        ctx = StageContext(run_id="scheduler-subtopic", settings=settings, db=session, stage="subtopic")
+        ctx = StageContext(
+            run_id="scheduler-subtopic", settings=settings, db=session, stage="subtopic"
+        )
         subtopic_agent = SubtopicAgent(router=router)
         await subtopic_agent.run(ctx)
 
     # 8. Semantic similarity edges stage
     logger.info("incremental_pipeline.stage", stage="semantic_edges")
     async with get_session(factory) as session:
-        ctx = StageContext(run_id="scheduler-semantic_edges", settings=settings, db=session, stage="semantic_edges")
+        ctx = StageContext(
+            run_id="scheduler-semantic_edges", settings=settings, db=session, stage="semantic_edges"
+        )
         semantic_edge_agent = SemanticEdgeAgent()
         await semantic_edge_agent.run(ctx)
 
     # 9. Knowledge graph building stage
     logger.info("incremental_pipeline.stage", stage="graph_build")
     async with get_session(factory) as session:
-        ctx = StageContext(run_id="scheduler-graph_build", settings=settings, db=session, stage="graph_build")
+        ctx = StageContext(
+            run_id="scheduler-graph_build", settings=settings, db=session, stage="graph_build"
+        )
         graph_build_agent = GraphBuildAgent()
         await graph_build_agent.run(ctx)
 
     # 10. Obsidian vault writing stage
     logger.info("incremental_pipeline.stage", stage="vault_write")
     async with get_session(factory) as session:
-        ctx = StageContext(run_id="scheduler-vault_write", settings=settings, db=session, stage="vault_write")
+        ctx = StageContext(
+            run_id="scheduler-vault_write", settings=settings, db=session, stage="vault_write"
+        )
         vault_write_agent = VaultWriteAgent()
         await vault_write_agent.run(ctx)
 

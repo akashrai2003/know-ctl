@@ -40,9 +40,7 @@ class CommentsPage:
 
             # Wait for first comments to render
             with contextlib.suppress(Exception):
-                await self.page.wait_for_selector(
-                    "article.comments-comment-entity", timeout=8_000
-                )
+                await self.page.wait_for_selector("article.comments-comment-entity", timeout=8_000)
             await asyncio.sleep(1)
 
             # ── Step 1: load all top-level comments ──────────────────────────
@@ -71,8 +69,8 @@ class CommentsPage:
                 "button[aria-label*='load previous replies'], "
                 "button[aria-label*='view replies']"
             )
-            MAX_REPLY_ROUNDS = 10
-            for _ in range(MAX_REPLY_ROUNDS):
+            max_reply_rounds = 10
+            for _ in range(max_reply_rounds):
                 btns = await self.page.locator(reply_expand_sel).all()
                 if not btns:
                     break
@@ -96,8 +94,12 @@ class CommentsPage:
                 c["rank"] = i
             collected = batch
 
-            logger.info("comments.post_done", urn=urn, count=len(collected),
-                        replies=sum(1 for c in collected if c.get("is_reply")))
+            logger.info(
+                "comments.post_done",
+                urn=urn,
+                count=len(collected),
+                replies=sum(1 for c in collected if c.get("is_reply")),
+            )
 
         except Exception as exc:
             logger.error("comments.page_failed", urn=urn, error=str(exc))

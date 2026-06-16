@@ -55,7 +55,9 @@ class GraphBuilder:
 
         node_id = _slug(name)
         self.add_node(
-            NodeData(node_id=node_id, node_type="topic", label=name, meta={"description": description})
+            NodeData(
+                node_id=node_id, node_type="topic", label=name, meta={"description": description}
+            )
         )
 
     def link_post_to_topic(

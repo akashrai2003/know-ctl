@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 
 import structlog
 
 from socialgraph.connectors.base import RawPost
+from socialgraph.utils import slugify
 
 logger = structlog.get_logger(__name__)
 
@@ -47,9 +47,7 @@ def find_posts(obj: Any, results: list[dict] | None = None) -> list[dict]:
 def _author_slug(name: str | None) -> str:
     if not name:
         return "unknown"
-    slug = name.lower()
-    slug = re.sub(r"[^a-z0-9]+", "_", slug)
-    return slug.strip("_")[:80]
+    return slugify(name)
 
 
 class LinkedInJSONConnector:

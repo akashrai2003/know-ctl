@@ -12,6 +12,7 @@ All modules get loggers via:
     import structlog
     logger = structlog.get_logger(__name__)
 """
+
 from __future__ import annotations
 
 import logging
@@ -74,8 +75,8 @@ def configure_logging(settings: object) -> None:
     ]
 
     structlog.configure(
-        processors=shared_processors
-        + [
+        processors=[
+            *shared_processors,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         logger_factory=structlog.stdlib.LoggerFactory(),

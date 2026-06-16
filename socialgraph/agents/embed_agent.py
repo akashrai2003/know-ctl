@@ -1,4 +1,5 @@
 """Embed agent: generate and store vLLM text embeddings for all posts."""
+
 from __future__ import annotations
 
 import json
@@ -23,11 +24,14 @@ class EmbedAgent:
 
     async def run(self, ctx: StageContext) -> StageOutput:
         from socialgraph.knowledge.search import embed_texts_local
+
         repo = Repo(ctx.db)
         posts = await repo.get_posts_without_embeddings()
 
         if not posts:
-            return StageOutput(stage=self.name, skipped=1, meta={"reason": "all posts already embedded"})
+            return StageOutput(
+                stage=self.name, skipped=1, meta={"reason": "all posts already embedded"}
+            )
 
         base_url = ctx.settings.vllm_base_url.rstrip("/") if ctx.settings.vllm_base_url else ""
         model = ctx.settings.vllm_model
@@ -47,10 +51,7 @@ class EmbedAgent:
 
         for i in range(0, len(posts), self._batch_size):
             batch = posts[i : i + self._batch_size]
-            texts = [
-                f"{p.title or ''}\n{p.content[:1000]}".strip()
-                for p in batch
-            ]
+            texts = [f"{p.title or ''}\n{p.content[:1000]}".strip() for p in batch]
 
             vectors = None
             used_model = model

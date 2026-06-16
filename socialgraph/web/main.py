@@ -1,4 +1,5 @@
 """FastAPI application for Social Graph web dashboard."""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -24,7 +25,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     """Factory: create and configure the FastAPI app."""
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(_app: FastAPI):
         s = settings or Settings()
         init_globals(s)
         logger.info("web.startup", port=s.web_port)
@@ -71,15 +72,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         offset: int = Query(0, ge=0),
         db: AsyncSession = Depends(get_db),
     ):
-        return await service.list_posts(db, topic=topic, author=author, q=q, limit=limit, offset=offset)
+        return await service.list_posts(
+            db, topic=topic, author=author, q=q, limit=limit, offset=offset
+        )
 
     @app.get("/api/posts/{urn:path}")
     async def api_post_detail(
         urn: str,
         db: AsyncSession = Depends(get_db),
-        settings: Settings = Depends(get_settings),
     ):
-        detail = await service.get_post_detail(db, urn, settings=settings)
+        detail = await service.get_post_detail(db, urn)
         if not detail:
             return {"error": f"Post '{urn}' not found"}
         return detail

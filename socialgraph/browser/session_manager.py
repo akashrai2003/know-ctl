@@ -4,7 +4,7 @@ import os
 import time as _time
 
 import structlog
-from playwright.async_api import Page, async_playwright
+from playwright.async_api import Browser, BrowserContext, Page, Playwright, async_playwright
 
 from socialgraph.config.settings import Settings
 
@@ -13,6 +13,9 @@ logger = structlog.get_logger(__name__)
 
 class BrowserSessionManager:
     _STATE_PATH = ".socialgraph/linkedin_state.json"
+    pw: Playwright | None
+    browser: Browser | None
+    context: BrowserContext | None
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -22,9 +25,7 @@ class BrowserSessionManager:
 
     async def start(self) -> BrowserSessionManager:
         self.pw = await async_playwright().start()
-        self.browser = await self.pw.chromium.launch(
-            headless=self.settings.playwright_headless
-        )
+        self.browser = await self.pw.chromium.launch(headless=self.settings.playwright_headless)
 
         state_path = self._STATE_PATH
         storage_state = state_path if os.path.exists(state_path) else None
@@ -59,15 +60,20 @@ class BrowserSessionManager:
         page = await self.context.new_page()
         try:
             from playwright_stealth import stealth_async
+
             await stealth_async(page)
         except ImportError:
             # Fallback if package is not yet installed in active environment
-            await page.add_init_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            await page.add_init_script(
+                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+            )
         return page
 
     async def is_logged_in(self) -> bool:
         """Check li_at cookie expiry without any navigation (avoids bot detection)."""
         try:
+            if self.context is None:
+                return False
             cookies = await self.context.cookies("https://www.linkedin.com")
             for c in cookies:
                 if c["name"] == "li_at":

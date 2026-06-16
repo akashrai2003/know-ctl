@@ -8,6 +8,7 @@ Usage:
     sg mcp serve --transport stdio
     sg mcp serve --transport http --port 8765
 """
+
 from __future__ import annotations
 
 import json
@@ -217,7 +218,7 @@ async def _search_posts(
 
             top = find_similar(qvec, filtered, top_k=limit)
             post_ids = [pid for pid, _ in top]
-            scores = {pid: score for pid, score in top}
+            scores = dict(top)
             rows = await session.scalars(select(Post).where(Post.id.in_(post_ids)))
             posts = {p.id: p for p in rows.all()}
             return [
@@ -235,10 +236,10 @@ async def _search_posts(
             logger.warning("mcp.search_embed_failed", error=str(exc))
 
     # Fallback: keyword search
-    posts = await keyword_search(session, query, limit=limit)
+    kw_posts = await keyword_search(session, query, limit=limit)
     return [
         {"urn": p.urn, "author": p.author, "title": p.title, "source_url": p.source_url}
-        for p in posts
+        for p in kw_posts
     ]
 
 
@@ -254,14 +255,11 @@ async def _get_topic_summary(session, name: str) -> dict:
         return {"error": f"Topic '{name}' not found"}
 
     post_count = (
-        await session.scalar(
-            select(func.count(PostTopic.id)).where(PostTopic.topic_id == topic.id)
-        )
+        await session.scalar(select(func.count(PostTopic.id)).where(PostTopic.topic_id == topic.id))
     ) or 0
 
     subtopic_rows = await session.scalars(
-        select(PostSubtopic.subtopic_name)
-        .where(PostSubtopic.topic_id == topic.id)
+        select(PostSubtopic.subtopic_name).where(PostSubtopic.topic_id == topic.id)
     )
     subtopic_counts: Counter = Counter(subtopic_rows.all())
     top_subtopics = [s for s, _ in subtopic_counts.most_common(5)]
@@ -279,11 +277,7 @@ async def _get_author_profile(session, name: str) -> dict:
 
     from socialgraph.storage.models import Post, PostTopic, Topic
 
-    post_count = (
-        await session.scalar(
-            select(func.count(Post.id)).where(Post.author == name)
-        )
-    ) or 0
+    post_count = (await session.scalar(select(func.count(Post.id)).where(Post.author == name))) or 0
     if post_count == 0:
         return {"error": f"Author '{name}' not found"}
 
@@ -301,7 +295,7 @@ async def _get_author_profile(session, name: str) -> dict:
     return {"author": name, "post_count": post_count, "top_topics": top_topics}
 
 
-async def _find_similar(session, settings, urn: str, limit: int = 5) -> list[dict]:
+async def _find_similar(session, _settings, urn: str, limit: int = 5) -> list[dict]:
     from sqlalchemy import select
 
     from socialgraph.knowledge.search import find_similar, load_embeddings
@@ -316,12 +310,13 @@ async def _find_similar(session, settings, urn: str, limit: int = 5) -> list[dic
         return [{"error": "No embedding for this post. Run sg embed first."}]
 
     import json as _json
+
     target_vec = _json.loads(emb_row.vector_json)
     all_embeddings = await load_embeddings(session)
 
     top = find_similar(target_vec, all_embeddings, top_k=limit, exclude_post_id=post.id)
     post_ids = [pid for pid, _ in top]
-    scores = {pid: score for pid, score in top}
+    scores = dict(top)
     rows = await session.scalars(select(Post).where(Post.id.in_(post_ids)))
     posts = {p.id: p for p in rows.all()}
     return [
@@ -368,14 +363,14 @@ async def _traverse_graph(session, topic: str, depth: int = 2) -> dict:
 
 
 async def _get_weekly_digest(session, days: int = 7) -> dict:
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     from sqlalchemy import select
 
     from socialgraph.storage.models import Post, PostTopic, Topic
 
     # Parse all posts; LinkedIn date_raw is relative so we use created_at as proxy
-    cutoff = datetime.utcnow() - timedelta(days=days)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     rows = await session.execute(
         select(Post.urn, Post.author, Post.title, Post.content, Topic.name.label("topic"))
         .join(PostTopic, PostTopic.post_id == Post.id, isouter=True)
@@ -391,16 +386,18 @@ async def _get_weekly_digest(session, days: int = 7) -> dict:
             continue
         seen_urns.add(urn)
         key = topic_name or "Uncategorized"
-        by_topic.setdefault(key, []).append({
-            "urn": urn,
-            "author": author,
-            "title": title or (content or "")[:80],
-        })
+        by_topic.setdefault(key, []).append(
+            {
+                "urn": urn,
+                "author": author,
+                "title": title or (content or "")[:80],
+            }
+        )
 
     return {
         "days": days,
         "total_posts": len(seen_urns),
-        "by_topic": {k: v for k, v in sorted(by_topic.items())},
+        "by_topic": dict(sorted(by_topic.items())),
     }
 
 
@@ -416,8 +413,7 @@ async def _list_topics(session) -> list[dict]:
         .order_by(func.count(PostTopic.id).desc())
     )
     return [
-        {"name": row[0], "description": (row[1] or "")[:200], "post_count": row[2]}
-        for row in rows
+        {"name": row[0], "description": (row[1] or "")[:200], "post_count": row[2]} for row in rows
     ]
 
 
@@ -427,6 +423,7 @@ async def _get_timeline(
     author: str | None = None,
 ) -> list[dict]:
     from socialgraph.knowledge.graph_analytics import get_timeline
+
     return await get_timeline(session, topic=topic, author=author)
 
 

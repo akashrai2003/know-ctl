@@ -1,4 +1,5 @@
 """Comment agent: scrape LinkedIn comments for saved posts via Voyager API."""
+
 from __future__ import annotations
 
 import structlog
@@ -30,6 +31,7 @@ class CommentAgent:
             from sqlalchemy import update
 
             from socialgraph.storage.models import Post
+
             await ctx.db.execute(update(Post).values(comments_fetched=False))
             await ctx.db.flush()
 
@@ -91,7 +93,9 @@ class CommentAgent:
                 comments_so_far=total_comments,
             )
 
-        logger.info("comments.complete", processed=processed, failed=failed, comments=total_comments)
+        logger.info(
+            "comments.complete", processed=processed, failed=failed, comments=total_comments
+        )
         return StageOutput(
             stage=self.name,
             processed=processed,

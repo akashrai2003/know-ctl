@@ -1,11 +1,38 @@
+# ─── Secrets — NEVER commit ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Data files (user-specific) ──────────────────────────────────────────────
+linkedin_saved_posts*.json
+topic_taxonomy.json
+
+# ─── Runtime state ────────────────────────────────────────────────────────────
 vault/
 .socialgraph/
-.env
+
+# ─── Python ───────────────────────────────────────────────────────────────────
 *.pyc
 __pycache__/
 *.egg-info/
 dist/
+build/
+
+# ─── Tool caches ─────────────────────────────────────────────────────────────
 .ruff_cache/
 .mypy_cache/
 .pytest_cache/
-linkedin_saved_posts*.json
+htmlcov/
+.coverage
+coverage.xml
+
+# ─── IDE ──────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+
+# ─── Agent / AI context files (private) ──────────────────────────────────────
+.automa/
+.claude/
+.gemini/
+CLAUDE.md
+AGENTS.md

@@ -39,7 +39,9 @@ class SavedPostsPage:
             await asyncio.wait_for(voyager_fired.wait(), timeout=15)
             logger.info("linkedin.voyager_detected")
         except asyncio.TimeoutError:
-            logger.warning("linkedin.voyager_timeout", msg="Voyager API not detected, proceeding anyway")
+            logger.warning(
+                "linkedin.voyager_timeout", msg="Voyager API not detected, proceeding anyway"
+            )
 
         # Small pause so the URL is fully registered in performance entries
         await asyncio.sleep(2)
@@ -53,9 +55,9 @@ class SavedPostsPage:
             errors = result.get("hydrationErrors", [])
             if errors:
                 logger.warning(
-                     "linkedin.hydration_errors",
-                     count=len(errors),
-                     samples=[e["urn"] + ": " + e["error"] for e in errors[:5]],
+                    "linkedin.hydration_errors",
+                    count=len(errors),
+                    samples=[e["urn"] + ": " + e["error"] for e in errors[:5]],
                 )
             logger.info("linkedin.playwright_extracted", count=len(posts))
             return posts

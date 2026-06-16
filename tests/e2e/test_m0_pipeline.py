@@ -1,4 +1,5 @@
 """E2E test: run full pipeline against sample fixture posts."""
+
 from __future__ import annotations
 
 import json
@@ -45,6 +46,7 @@ async def test_settings(tmp_path: Path) -> Settings:
 async def test_ingest_stage(sample_posts_json: Path, test_settings: Settings):
     factory = build_session_factory(test_settings.db_path)
     from socialgraph.storage.db import get_session
+
     async with get_session(factory) as session:
         agent = IngestAgent(sample_posts_json)
         ctx = StageContext(

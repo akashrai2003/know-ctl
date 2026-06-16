@@ -64,7 +64,9 @@ class LinkedInLoginPage:
         if "/checkpoint/" in self.page.url or "/challenge/" in self.page.url:
             logger.warning("linkedin.checkpoint_detected", url=self.page.url)
             try:
-                agree = self.page.locator('button:has-text("Agree to comply"), a:has-text("Agree to comply")').first
+                agree = self.page.locator(
+                    'button:has-text("Agree to comply"), a:has-text("Agree to comply")'
+                ).first
                 if await agree.is_visible(timeout=5_000):
                     await agree.click()
                     await self.page.wait_for_function(
@@ -76,6 +78,8 @@ class LinkedInLoginPage:
 
         logger.info(
             "linkedin.login_success",
-            domain=self.settings.linkedin_email.split("@")[-1] if "@" in self.settings.linkedin_email else "unknown",
+            domain=self.settings.linkedin_email.split("@")[-1]
+            if "@" in self.settings.linkedin_email
+            else "unknown",
         )
         return self.page

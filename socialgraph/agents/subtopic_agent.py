@@ -7,7 +7,10 @@ Pipeline:
   4. Groq merge pass: consolidate overlapping subtopics per topic.
   5. Persist Post.title and PostSubtopic rows.
 """
+
 from __future__ import annotations
+
+from typing import Any
 
 import structlog
 from sqlalchemy import select
@@ -64,15 +67,6 @@ def _build_message(post: Post, topic_name: str, existing_subtopics: list[str]) -
     ]
 
 
-def _primary_topic(post: Post) -> PostTopic | None:
-    """Return the PostTopic with the highest confidence_score for this post, breaking ties alphabetically by topic name."""
-    if not post.post_topics:
-        return None
-    # Sort descending by confidence_score and ascending by topic name
-    sorted_pts = sorted(post.post_topics, key=lambda pt: (-pt.confidence_score, pt.topic.name))
-    return sorted_pts[0]
-
-
 class SubtopicAgent:
     name = "subtopic"
 
@@ -125,7 +119,8 @@ class SubtopicAgent:
 
             # Only process posts that haven't been assigned a subtopic for this topic yet
             posts_needing_subtopic = [
-                p for p in topic_posts
+                p
+                for p in topic_posts
                 if not any(ps.topic_id == topic_id for ps in p.post_subtopics)
             ]
             if not posts_needing_subtopic:
@@ -146,9 +141,11 @@ class SubtopicAgent:
             topic_posts = posts_needing_subtopic
 
             # ── Bootstrap: first min(5, N) posts ────────────────────────
-            bootstrap = topic_posts[: _BOOTSTRAP_SIZE]
+            bootstrap = topic_posts[:_BOOTSTRAP_SIZE]
             messages_list = [_build_message(p, topic_name, []) for p in bootstrap]
-            results = await client.batch_chat(messages_list, response_format=_TITLE_SUBTOPIC_RESPONSE_FORMAT)
+            results = await client.batch_chat(
+                messages_list, response_format=_TITLE_SUBTOPIC_RESPONSE_FORMAT
+            )
 
             for post, res in zip(bootstrap, results, strict=False):
                 if not res:
@@ -198,9 +195,7 @@ async def _apply_result(
         post.summary = summary
     if subtopic:
         # Normalize: check if it's close to an existing subtopic (exact match ignoring case)
-        canonical = next(
-            (s for s in existing_subtopics if s.lower() == subtopic.lower()), subtopic
-        )
+        canonical = next((s for s in existing_subtopics if s.lower() == subtopic.lower()), subtopic)
         if canonical not in existing_subtopics:
             existing_subtopics.append(canonical)
         await repo.upsert_post_subtopic(post.id, topic_id, canonical)
@@ -217,7 +212,7 @@ async def _merge_subtopics(
     topic_name: str,
     topic_id: int,
     repo: Repo,
-    groq_client: object,
+    groq_client: Any,
 ) -> None:
     subtopic_list = "\n".join(f"- {s}" for s in existing_subtopics)
     result = groq_client.complete(  # type: ignore[union-attr]

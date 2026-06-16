@@ -1,4 +1,5 @@
 """FastAPI dependency injection for Social Graph web server."""
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
@@ -22,6 +23,11 @@ def init_globals(settings: Settings) -> None:
 
 
 def get_settings() -> Settings:
+    """Retrieve the global Settings instance.
+
+    Returns:
+        The initialized Settings object.
+    """
     assert _settings is not None, "Settings not initialised — call init_globals first"
     return _settings
 

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Application-wide configuration settings loaded from environment variables or .env file."""
+
     model_config = SettingsConfigDict(
         env_prefix="SG_",
         env_file=".env",
@@ -69,7 +71,7 @@ class Settings(BaseSettings):
 
     @field_validator("vllm_batch_url", mode="after")
     @classmethod
-    def default_batch_url(cls, v: str, info: object) -> str:
+    def default_batch_url(cls, v: str, info: ValidationInfo) -> str:
         if not v:
             # info.data available after other fields are set
             try:

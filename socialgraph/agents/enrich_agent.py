@@ -1,4 +1,5 @@
 """Enrich agent: fetch external URLs, extract content, process comments."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,7 @@ import contextlib
 import json
 import re
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -14,12 +15,15 @@ import httpx
 import structlog
 import trafilatura
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
+from playwright.async_api import Browser, async_playwright
 from sqlalchemy import select, update
 
 from socialgraph.agents.base import StageContext, StageOutput
+from socialgraph.storage.enums import FetchStatus, PostStatus
 from socialgraph.storage.models import ExternalLink, Post
 from socialgraph.storage.repo import Repo
+
+UTC = timezone.utc
 
 if TYPE_CHECKING:
     from socialgraph.llm.router import LLMRouter
@@ -56,7 +60,7 @@ POPUP_DISMISS_SELECTORS = [
 ]
 
 BLOCKED_URL_PATTERNS = [
-    "linkedin.com",   # feed/profile pages — not articles (lnkd.in is allowed)
+    "linkedin.com",  # feed/profile pages — not articles (lnkd.in is allowed)
     "twitter.com",
     "x.com",
     "t.co",
@@ -101,9 +105,7 @@ class EnrichAgent:
 
     async def run(self, ctx: StageContext) -> StageOutput:
         # Run on all posts that have actual content (not just newly ingested ones)
-        result = await ctx.db.scalars(
-            select(Post).where(Post.status.in_(["ingested", "pending"]))
-        )
+        result = await ctx.db.scalars(select(Post).where(Post.status.in_(["ingested", "pending"])))
         posts = list(result.all())
 
         if not posts:
@@ -119,21 +121,21 @@ class EnrichAgent:
         # Reset any links stuck in "fetching" from a previous interrupted run
         await ctx.db.execute(
             update(ExternalLink)
-            .where(ExternalLink.fetch_status == "fetching")
-            .values(fetch_status="pending")
+            .where(ExternalLink.fetch_status == FetchStatus.FETCHING.value)
+            .values(fetch_status=FetchStatus.PENDING.value)
         )
 
         # Reset junk entries so they get a fresh fetch (Colab→notebook, etc.)
         junk_result = await ctx.db.scalars(
             select(ExternalLink).where(
-                ExternalLink.fetch_status == "ok",
+                ExternalLink.fetch_status == FetchStatus.OK.value,
                 ExternalLink.body_excerpt.isnot(None),
             )
         )
         junk_reset = 0
         for lnk in junk_result.all():
             if _is_junk_content(lnk.body_excerpt, lnk.title):
-                lnk.fetch_status = "pending"
+                lnk.fetch_status = FetchStatus.PENDING.value
                 lnk.error_reason = None
                 lnk.body_excerpt = None
                 lnk.ai_summary = None
@@ -143,7 +145,7 @@ class EnrichAgent:
 
         # Reset retryable failed URLs — Playwright may succeed where httpx couldn't
         failed_result = await ctx.db.scalars(
-            select(ExternalLink).where(ExternalLink.fetch_status == "failed")
+            select(ExternalLink).where(ExternalLink.fetch_status == FetchStatus.FAILED.value)
         )
         retryable_reset = 0
         for lnk in failed_result.all():
@@ -155,7 +157,7 @@ class EnrichAgent:
                 or err.startswith("SSL:")
                 or err.startswith("Server disconnected")
             ):
-                lnk.fetch_status = "pending"
+                lnk.fetch_status = FetchStatus.PENDING.value
                 lnk.error_reason = None
                 retryable_reset += 1
 
@@ -170,17 +172,20 @@ class EnrichAgent:
 
             async with httpx.AsyncClient(
                 timeout=FETCH_TIMEOUT,
-                headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                },
                 follow_redirects=True,
             ) as client:
+
                 async def enrich_one(post: Post) -> None:
                     nonlocal processed, failed
                     async with semaphore:
                         try:
                             await _enrich_post(post, repo, client, browser, pw_sem, db_sem)
                             async with db_sem:
-                                post.status = "enriched"
-                                await repo._s.flush()
+                                post.status = PostStatus.ENRICHED.value
+                                await repo.flush()
                             processed += 1
                         except Exception as exc:
                             logger.error("enrich.post_failed", urn=post.urn, error=str(exc))
@@ -202,7 +207,14 @@ class EnrichAgent:
         return StageOutput(stage=self.name, processed=processed, failed=failed)
 
 
-async def _enrich_post(post: Post, repo: Repo, client: httpx.AsyncClient, browser, pw_sem: asyncio.Semaphore, db_sem: asyncio.Semaphore) -> None:
+async def _enrich_post(
+    post: Post,
+    repo: Repo,
+    client: httpx.AsyncClient,
+    browser: Browser,
+    pw_sem: asyncio.Semaphore,
+    db_sem: asyncio.Semaphore,
+) -> None:
     urls = _extract_urls(post.content or "")
     for url in urls:
         if not should_fetch_url(url):
@@ -210,14 +222,14 @@ async def _enrich_post(post: Post, repo: Repo, client: httpx.AsyncClient, browse
 
         # --- DB: get-or-create link record (serialised) ---
         async with db_sem:
-            link, created = await repo.get_or_create_external_link(url)
+            link, _ = await repo.get_or_create_external_link(url)
             link_id = link.id
             # Fetch if newly created OR if reset to pending (e.g. after junk cleanup)
             needs_fetch = link.fetch_status == "pending"
             if needs_fetch:
                 # Mark as fetching *inside* db_sem before releasing it
                 link.fetch_status = "fetching"
-                await repo._s.flush()
+                await repo.flush()
             await repo.link_post_to_url(post.id, link_id, context="body")
 
         if not needs_fetch:
@@ -228,7 +240,7 @@ async def _enrich_post(post: Post, repo: Repo, client: httpx.AsyncClient, browse
 
         # --- DB: write results back (serialised) ---
         async with db_sem:
-            lnk = await repo._s.get(ExternalLink, link_id)
+            lnk = await repo.get(ExternalLink, link_id)
             if lnk is None:
                 continue
             lnk.fetch_status = data["fetch_status"]
@@ -237,7 +249,7 @@ async def _enrich_post(post: Post, repo: Repo, client: httpx.AsyncClient, browse
             lnk.body_excerpt = data.get("body_excerpt")
             lnk.error_reason = data.get("error_reason")
             lnk.fetched_at = data.get("fetched_at")
-            await repo._s.flush()
+            await repo.flush()
 
 
 async def _resolve_and_fetch(
@@ -279,7 +291,7 @@ async def _resolve_and_fetch(
                 result["fetch_status"] = "ok"
                 result["title"] = Path(nb_path).stem.replace("-", " ").replace("_", " ").title()
                 result["body_excerpt"] = nb_text
-                result["fetched_at"] = datetime.utcnow()
+                result["fetched_at"] = datetime.now(UTC)
                 return result
             # Fall through to normal fetch if notebook unavailable
 
@@ -291,7 +303,7 @@ async def _resolve_and_fetch(
                 result["fetch_status"] = "ok"
                 result["title"] = f"{gh.group(1)}/{gh.group(2)}"
                 result["body_excerpt"] = readme
-                result["fetched_at"] = datetime.utcnow()
+                result["fetched_at"] = datetime.now(UTC)
                 return result
             # Fall through to normal fetch (repo page) if no README found
 
@@ -333,8 +345,9 @@ async def _resolve_and_fetch(
         if b"external_url_click" in html:
             soup_chk = BeautifulSoup(html, "lxml")
             anchor = soup_chk.find("a", {"data-tracking-control-name": "external_url_click"})
-            if anchor and anchor.get("href", "").startswith("http"):
-                return await _resolve_and_fetch(anchor["href"], client, browser, pw_sem, _depth + 1)
+            href = anchor.get("href") if anchor else None
+            if anchor and isinstance(href, str) and href.startswith("http"):
+                return await _resolve_and_fetch(href, client, browser, pw_sem, _depth + 1)
             result["fetch_status"] = "skipped"
             result["error_reason"] = "linkedin_safety_no_url"
             return result
@@ -364,11 +377,15 @@ async def _resolve_and_fetch(
         og_title = soup.find("meta", {"property": "og:title"})
         og_desc = soup.find("meta", {"property": "og:description"})
 
-        title = (og_title.get("content", "").strip() if og_title else None) or \
-                (title_tag.text.strip() if title_tag else None)
+        og_title_content = og_title.get("content") if og_title else None
+        og_desc_content = og_desc.get("content") if og_desc else None
+
+        title = (og_title_content.strip() if isinstance(og_title_content, str) else None) or (
+            title_tag.text.strip() if title_tag else None
+        )
 
         result["title"] = title[:512] if title else None
-        result["description"] = og_desc.get("content", "")[:1024] if og_desc else None
+        result["description"] = og_desc_content[:1024] if isinstance(og_desc_content, str) else None
 
         # Detect junk pages before storing
         if _is_junk_content(text, title):
@@ -378,13 +395,15 @@ async def _resolve_and_fetch(
 
         result["body_excerpt"] = text[:5000] if text else None
         result["fetch_status"] = "ok"
-        result["fetched_at"] = datetime.utcnow()
+        result["fetched_at"] = datetime.now(UTC)
 
     except Exception as exc:
         err_str = str(exc)[:256]
         # SSL errors / connection issues — Playwright may bypass them
-        if browser and pw_sem and (
-            "SSL:" in err_str or "CERTIFICATE" in err_str or "certificate" in err_str
+        if (
+            browser
+            and pw_sem
+            and ("SSL:" in err_str or "CERTIFICATE" in err_str or "certificate" in err_str)
         ):
             try:
                 async with pw_sem:
@@ -468,12 +487,14 @@ async def _playwright_fetch(url: str, browser) -> dict:
         # ── Handle lnkd.in interstitial rendered by JS ───────────────────
         html_bytes = (await page.content()).encode("utf-8", errors="replace")
         if b"external_url_click" in html_bytes:
-            from bs4 import BeautifulSoup as _BS
-            soup_chk = _BS(html_bytes, "lxml")
+            from bs4 import BeautifulSoup
+
+            soup_chk = BeautifulSoup(html_bytes, "lxml")
             anchor = soup_chk.find("a", {"data-tracking-control-name": "external_url_click"})
-            if anchor and anchor.get("href", "").startswith("http"):
+            href = anchor.get("href") if anchor else None
+            if anchor and isinstance(href, str) and href.startswith("http"):
                 # Navigate to the real URL in the same tab
-                resp2 = await page.goto(anchor["href"], timeout=25000, wait_until="domcontentloaded")
+                resp2 = await page.goto(href, timeout=25000, wait_until="domcontentloaded")
                 if resp2 and resp2.status not in (200, 304, 0):
                     result["fetch_status"] = "failed"
                     result["error_reason"] = f"http_{resp2.status}"
@@ -490,17 +511,22 @@ async def _playwright_fetch(url: str, browser) -> dict:
             favor_precision=False,
         )
 
-        from bs4 import BeautifulSoup as _BS2
-        soup = _BS2(html, "lxml")
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(html, "lxml")
         title_tag = soup.find("title")
         og_title = soup.find("meta", {"property": "og:title"})
         og_desc = soup.find("meta", {"property": "og:description"})
 
-        title = (og_title.get("content", "").strip() if og_title else None) or \
-                (title_tag.text.strip() if title_tag else None)
+        og_title_content = og_title.get("content") if og_title else None
+        og_desc_content = og_desc.get("content") if og_desc else None
+
+        title = (og_title_content.strip() if isinstance(og_title_content, str) else None) or (
+            title_tag.text.strip() if title_tag else None
+        )
 
         result["title"] = title[:512] if title else None
-        result["description"] = og_desc.get("content", "")[:1024] if og_desc else None
+        result["description"] = og_desc_content[:1024] if isinstance(og_desc_content, str) else None
 
         if _is_junk_content(text, title):
             result["fetch_status"] = "skipped"
@@ -509,7 +535,7 @@ async def _playwright_fetch(url: str, browser) -> dict:
 
         result["body_excerpt"] = text[:5000] if text else None
         result["fetch_status"] = "ok"
-        result["fetched_at"] = datetime.utcnow()
+        result["fetched_at"] = datetime.now(UTC)
 
     except Exception as exc:
         result["fetch_status"] = "failed"
@@ -522,7 +548,7 @@ async def _playwright_fetch(url: str, browser) -> dict:
     return result
 
 
-def _is_junk_content(text: str | None, title: str | None) -> bool:
+def _is_junk_content(text: str | None, _title: str | None) -> bool:
     """Return True if extracted content is clearly worthless and should not be summarized."""
     if not text:
         return True
@@ -537,8 +563,9 @@ def _is_junk_content(text: str | None, title: str | None) -> bool:
     return len(t) < 80
 
 
-async def _fetch_colab_notebook(user: str, repo: str, branch: str, nb_path: str,
-                                client: httpx.AsyncClient) -> str | None:
+async def _fetch_colab_notebook(
+    user: str, repo: str, branch: str, nb_path: str, client: httpx.AsyncClient
+) -> str | None:
     """Fetch a Colab /github/ notebook and return a readable text excerpt.
 
     Converts the raw .ipynb JSON into plain text: markdown cells first,
@@ -600,7 +627,7 @@ async def _summarize_links(db, router: LLMRouter, log_path: Path) -> None:  # ty
 
     result = await db.scalars(
         select(ExternalLink).where(
-            ExternalLink.fetch_status == "ok",
+            ExternalLink.fetch_status == FetchStatus.OK.value,
             ExternalLink.body_excerpt.isnot(None),
             ExternalLink.ai_summary.is_(None),
         )
@@ -631,21 +658,29 @@ async def _summarize_links(db, router: LLMRouter, log_path: Path) -> None:  # ty
                     url=lnk.url,
                     excerpt=excerpt,
                 )
-                messages_list.append([
-                    {"role": "system", "content": SUMMARIZE_CONTENT_SYSTEM},
-                    {"role": "user", "content": user_msg},
-                ])
+                messages_list.append(
+                    [
+                        {"role": "system", "content": SUMMARIZE_CONTENT_SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ]
+                )
             try:
                 results = await client.batch_chat(messages_list, temperature=0.1, max_tokens=500)
                 for lnk, messages, summary in zip(batch, messages_list, results, strict=False):
                     if summary and isinstance(summary, str):
                         lnk.ai_summary = summary.strip()[:2000]
-                    log_fh.write(json.dumps({
-                        "url": lnk.url,
-                        "title": lnk.title,
-                        "prompt": messages[-1]["content"],
-                        "response": summary,
-                    }, ensure_ascii=False) + "\n")
+                    log_fh.write(
+                        json.dumps(
+                            {
+                                "url": lnk.url,
+                                "title": lnk.title,
+                                "prompt": messages[-1]["content"],
+                                "response": summary,
+                            },
+                            ensure_ascii=False,
+                        )
+                        + "\n"
+                    )
             except Exception as exc:
                 logger.error("enrich.summarize_batch_failed", batch_i=i, error=str(exc))
     finally:

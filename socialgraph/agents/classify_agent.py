@@ -1,4 +1,5 @@
 """Classify agent: assign posts to taxonomy topics using vLLM batch."""
+
 from __future__ import annotations
 
 import structlog
@@ -8,6 +9,7 @@ from socialgraph.agents.base import StageContext, StageOutput
 from socialgraph.knowledge.taxonomy import Taxonomy
 from socialgraph.llm.prompts import CLASSIFY_POST_TOPICS_SYSTEM, CLASSIFY_POST_TOPICS_USER
 from socialgraph.llm.router import LLMRouter
+from socialgraph.storage.enums import PostStatus
 from socialgraph.storage.models import Post
 from socialgraph.storage.repo import Repo
 
@@ -40,16 +42,12 @@ class ClassifyAgent:
 
     async def run(self, ctx: StageContext) -> StageOutput:
 
-        result = await ctx.db.scalars(
-            select(Post).where(Post.status.in_(["enriched", "ingested"]))
-        )
+        result = await ctx.db.scalars(select(Post).where(Post.status.in_(["enriched", "ingested"])))
         posts = list(result.all())
 
         # Also reclassify posts that already completed the pipeline but have no topics
         unclassified_result = await ctx.db.scalars(
-            select(Post)
-            .where(Post.status.in_(["ok", "graphed"]))
-            .where(~Post.post_topics.any())
+            select(Post).where(Post.status.in_(["ok", "graphed"])).where(~Post.post_topics.any())
         )
         unclassified_posts = list(unclassified_result.all())
         # Track which ones were previously done so we can reset their status
@@ -85,12 +83,12 @@ class ClassifyAgent:
                 try:
                     await _apply_classification(post, res, repo, self._taxonomy, self._router)
                     # Reset previously-completed posts back to classified so graph_build re-runs
-                    post.status = "classified"
+                    post.status = PostStatus.CLASSIFIED.value
                     processed += 1
                 except Exception as exc:
                     logger.error("classify.post_failed", urn=post.urn, error=str(exc))
                     if post.id not in needs_regraph:
-                        post.status = "failed"
+                        post.status = PostStatus.FAILED.value
                     failed += 1
 
         await ctx.db.commit()
@@ -104,12 +102,24 @@ async def _apply_classification(
     if not result or not result.get("topics"):
         # Escalate to Groq if small model produced nothing
         groq = router.groq_client
-        prompt = f"List 1-3 topics for this post:\n{post.content[:600]}\nRespond as JSON {{\"topics\": [], \"confidence\": 0.0}}"
-        result = groq.complete(
-            [{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"},
-        )
-        if not result:
+        if groq is not None:
+            prompt = f'List 1-3 topics for this post:\n{post.content[:600]}\nRespond as JSON {{"topics": [], "confidence": 0.0}}'
+            res = groq.complete(
+                [{"role": "user", "content": prompt}],
+                response_format={"type": "json_object"},
+            )
+            if isinstance(res, dict):
+                result = res
+            elif isinstance(res, str):
+                try:
+                    import json
+
+                    result = json.loads(res)
+                except Exception:
+                    return
+            else:
+                return
+        else:
             return
 
     raw_score: float = float(result.get("confidence", 0.75))

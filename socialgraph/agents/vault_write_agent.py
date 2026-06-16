@@ -1,13 +1,15 @@
 """Vault write agent: write Obsidian .md files from graph/post data."""
+
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from socialgraph.agents.base import StageContext, StageOutput
+from socialgraph.agents.base import primary_topic as _primary_topic
 from socialgraph.knowledge.obsidian import (
     VaultWriter,
     _slug,
@@ -17,6 +19,7 @@ from socialgraph.knowledge.obsidian import (
     render_subtopic_note,
     render_topic_note,
 )
+from socialgraph.storage.enums import FetchStatus, PostStatus
 from socialgraph.storage.models import (
     Author,
     Comment,
@@ -26,16 +29,9 @@ from socialgraph.storage.models import (
     Topic,
 )
 
+UTC = timezone.utc
+
 logger = structlog.get_logger(__name__)
-
-
-def _primary_topic(post: Post) -> str | None:
-    """Return the name of the topic with the highest confidence_score for this post, breaking ties alphabetically by topic name."""
-    if not post.post_topics:
-        return None
-    # Sort descending by confidence_score and ascending by topic name
-    sorted_pts = sorted(post.post_topics, key=lambda pt: (-pt.confidence_score, pt.topic.name))
-    return sorted_pts[0].topic.name
 
 
 class VaultWriteAgent:
@@ -60,12 +56,13 @@ class VaultWriteAgent:
 
         # Load all embeddings if available for similar posts check
         from socialgraph.knowledge.search import find_similar, load_embeddings
+
         all_embeddings = []
         try:
             all_embeddings = await load_embeddings(ctx.db)
         except Exception as e:
             logger.warning("vault_write.embeddings_load_failed", error=str(e))
-        embedding_map = {post_id: vec for post_id, vec in all_embeddings}
+        embedding_map = dict(all_embeddings)
         posts_by_id = {p.id: p for p in posts}
 
         # Clear/re-populate the authors DB table
@@ -116,32 +113,45 @@ class VaultWriteAgent:
                     "ai_summary": pel.external_link.ai_summary,
                 }
                 for pel in post.post_links
-                if pel.context == "body" and pel.external_link.fetch_status == "ok"
+                if pel.context == "body" and pel.external_link.fetch_status == FetchStatus.OK.value
             ]
 
             comment_lookup: dict[int, Comment] = {c.id: c for c in (post.comments or [])}
             comment_links_data = []
             for pel in post.post_links:
-                if pel.context != "comment" or pel.external_link.fetch_status != "ok":
+                if (
+                    pel.context != "comment"
+                    or pel.external_link.fetch_status != FetchStatus.OK.value
+                ):
                     continue
                 lnk = pel.external_link
                 commenter_comment = comment_lookup.get(pel.comment_id) if pel.comment_id else None
-                comment_links_data.append({
-                    "url": lnk.url,
-                    "title": lnk.title,
-                    "description": lnk.description,
-                    "ai_summary": lnk.ai_summary,
-                    "commenter": commenter_comment.author if commenter_comment else None,
-                    "comment_text": (commenter_comment.text or "")[:200] if commenter_comment else None,
-                })
+                comment_links_data.append(
+                    {
+                        "url": lnk.url,
+                        "title": lnk.title,
+                        "description": lnk.description,
+                        "ai_summary": lnk.ai_summary,
+                        "commenter": commenter_comment.author if commenter_comment else None,
+                        "comment_text": (commenter_comment.text or "")[:200]
+                        if commenter_comment
+                        else None,
+                    }
+                )
 
-            comments_notable = any(
-                c.has_external_url for c in post.comments
-            ) if hasattr(post, "comments") else False
-            notable_comments = [
-                {"author": c.author, "text": c.text, "has_external_url": c.has_external_url}
-                for c in post.comments
-            ] if post.comments else []
+            comments_notable = (
+                any(c.has_external_url for c in post.comments)
+                if hasattr(post, "comments")
+                else False
+            )
+            notable_comments = (
+                [
+                    {"author": c.author, "text": c.text, "has_external_url": c.has_external_url}
+                    for c in post.comments
+                ]
+                if post.comments
+                else []
+            )
 
             # Cosine similarity matching
             related_posts = []
@@ -158,7 +168,7 @@ class VaultWriteAgent:
                         if other_post:
                             tail = other_post.urn.split(":")[-1]
                             other_title = other_post.title or (other_post.content[:50] + "...")
-                            other_title = other_title.replace('"', '').replace('\n', ' ').strip()
+                            other_title = other_title.replace('"', "").replace("\n", " ").strip()
                             related_posts.append(f"[[post_{tail}|{other_title}]]")
 
             try:
@@ -185,11 +195,11 @@ class VaultWriteAgent:
                     related_posts=related_posts,
                 )
                 writer.write_post(post.urn, note_content, platform=post.platform)
-                post.status = "ok"
+                post.status = PostStatus.OK.value
                 processed += 1
             except Exception as exc:
                 logger.error("vault_write.post_failed", urn=post.urn, error=str(exc))
-                post.status = "failed"
+                post.status = PostStatus.FAILED.value
                 failed += 1
                 continue
 
@@ -204,9 +214,7 @@ class VaultWriteAgent:
                 "content": post.content,
             }
             if primary:
-                primary_pt = next(
-                    (pt for pt in post.post_topics if pt.topic.name == primary), None
-                )
+                primary_pt = next((pt for pt in post.post_topics if pt.topic.name == primary), None)
                 if primary_pt:
                     sub_for_primary = ""
                     match = next(
@@ -215,7 +223,9 @@ class VaultWriteAgent:
                     )
                     if match:
                         sub_for_primary = match.subtopic_name
-                    topic_subtopic_posts.setdefault(primary, {}).setdefault(sub_for_primary, []).append(entry)
+                    topic_subtopic_posts.setdefault(primary, {}).setdefault(
+                        sub_for_primary, []
+                    ).append(entry)
 
         # Write topic MOC files — grouped by platform
         # Collect the platform for each topic from the posts that reference it
@@ -232,16 +242,14 @@ class VaultWriteAgent:
 
         # Write author pages
         for author_name, posts_for_author in author_posts.items():
-            topic_counts = {}
+            topic_counts: dict[str, int] = {}
             for p in posts_for_author:
                 for pt in p.post_topics:
                     topic_counts[pt.topic.name] = topic_counts.get(pt.topic.name, 0) + 1
             sorted_topics = sorted(topic_counts.items(), key=lambda x: (-x[1], x[0]))
 
             sorted_posts_for_render = sorted(
-                posts_for_author,
-                key=lambda p: p.created_at or datetime.min,
-                reverse=True
+                posts_for_author, key=lambda p: p.created_at or datetime.min, reverse=True
             )
             posts_data = [
                 {
@@ -260,7 +268,7 @@ class VaultWriteAgent:
             author_slug = _slug(author_name)
             author_note = render_author_note(
                 name=author_name,
-                slug=author_slug,
+                _author_slug=author_slug,
                 subtitle=subtitle,
                 platform=platform,
                 post_count=len(posts_for_author),
@@ -317,11 +325,12 @@ class VaultWriteAgent:
             render_index(
                 topic_names=list(topic_subtopic_posts.keys()),
                 total_posts=processed,
-                generated_at=datetime.utcnow(),
+                generated_at=datetime.now(UTC),
             )
         )
 
         await ctx.db.commit()
-        logger.info("vault_write.complete", processed=processed, failed=failed, subtopics=subtopic_count)
+        logger.info(
+            "vault_write.complete", processed=processed, failed=failed, subtopics=subtopic_count
+        )
         return StageOutput(stage=self.name, processed=processed, failed=failed)
-

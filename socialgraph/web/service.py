@@ -2,10 +2,10 @@
 
 Keeps FastAPI route handlers thin — they just call service functions and return.
 """
+
 from __future__ import annotations
 
 import json
-import re
 from collections import Counter
 from typing import Any
 
@@ -14,6 +14,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from socialgraph.config.settings import Settings
+from socialgraph.storage.enums import FetchStatus
 from socialgraph.storage.models import (
     Author,
     Comment,
@@ -30,20 +32,24 @@ from socialgraph.storage.models import (
 from socialgraph.storage.models import (
     GraphNode as GraphNodeModel,
 )
+from socialgraph.utils import slugify as _slug
 
 logger = structlog.get_logger(__name__)
-
-
-def _slug(text: str) -> str:
-    text = text.lower()
-    text = re.sub(r"[^a-z0-9]+", "_", text)
-    return text.strip("_")[:80]
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 
 async def get_stats(session: AsyncSession) -> dict[str, Any]:
+    """Retrieve overall counts and pipeline run status for the web dashboard.
+
+    Args:
+        session: Active SQLAlchemy database session.
+
+    Returns:
+        A dictionary containing overall metrics (posts, topics, authors, etc.)
+        and the details of the last pipeline run.
+    """
     total_posts = (await session.scalar(select(func.count(Post.id)))) or 0
     total_topics = (await session.scalar(select(func.count(Topic.id)))) or 0
     total_authors = (await session.scalar(select(func.count(Author.id)))) or 0
@@ -103,6 +109,14 @@ async def get_stats(session: AsyncSession) -> dict[str, Any]:
 
 
 async def list_topics(session: AsyncSession) -> list[dict]:
+    """Retrieve all topics with description, post count, and slug, ordered by popularity.
+
+    Args:
+        session: Active SQLAlchemy database session.
+
+    Returns:
+        A list of topic dictionary representations.
+    """
     rows = await session.execute(
         select(Topic.name, Topic.description, func.count(PostTopic.id).label("cnt"))
         .join(PostTopic, PostTopic.topic_id == Topic.id, isouter=True)
@@ -116,6 +130,17 @@ async def list_topics(session: AsyncSession) -> list[dict]:
 
 
 async def get_topic_detail(session: AsyncSession, slug: str) -> dict | None:
+    """Fetch detailed info for a single topic, matching by slug.
+
+    Includes associated subtopics, top authors, monthly post trends, and recent posts.
+
+    Args:
+        session: Active SQLAlchemy database session.
+        slug: The unique topic URL slug.
+
+    Returns:
+        A detailed topic dictionary, or None if the topic is not found.
+    """
     # Find topic by slug match
     all_topics = await session.scalars(select(Topic))
     topic = None
@@ -127,9 +152,7 @@ async def get_topic_detail(session: AsyncSession, slug: str) -> dict | None:
         return None
 
     post_count = (
-        await session.scalar(
-            select(func.count(PostTopic.id)).where(PostTopic.topic_id == topic.id)
-        )
+        await session.scalar(select(func.count(PostTopic.id)).where(PostTopic.topic_id == topic.id))
     ) or 0
 
     # Subtopics
@@ -198,6 +221,19 @@ async def list_posts(
     limit: int = 20,
     offset: int = 0,
 ) -> list[dict]:
+    """List posts with optional filters for topic, author, or keyword search.
+
+    Args:
+        session: Active SQLAlchemy database session.
+        topic: Optional topic filter name.
+        author: Optional author name filter.
+        q: Optional search query string for text matching.
+        limit: Max number of posts to return (defaults to 20).
+        offset: Offset for pagination (defaults to 0).
+
+    Returns:
+        A list of post dictionary representations.
+    """
     query = (
         select(Post)
         .options(selectinload(Post.post_topics).selectinload(PostTopic.topic))
@@ -235,7 +271,21 @@ async def list_posts(
     ]
 
 
-async def get_post_detail(session: AsyncSession, urn: str, settings=None) -> dict | None:
+async def get_post_detail(
+    session: AsyncSession, urn: str, _settings: Settings | None = None
+) -> dict[str, Any] | None:
+    """Fetch details for a single post by URN.
+
+    Includes associated topics, external links, comments, and similar posts.
+
+    Args:
+        session: Active SQLAlchemy database session.
+        urn: The unique platform URN of the post.
+        _settings: Optional application settings.
+
+    Returns:
+        A detailed post dictionary, or None if not found.
+    """
     post = await session.scalar(
         select(Post)
         .where(Post.urn == urn)
@@ -256,7 +306,7 @@ async def get_post_detail(session: AsyncSession, urn: str, settings=None) -> dic
             "ai_summary": pel.external_link.ai_summary,
         }
         for pel in post.post_links
-        if pel.external_link.fetch_status == "ok"
+        if pel.external_link.fetch_status == FetchStatus.OK.value
     ]
 
     comments = [
@@ -280,7 +330,7 @@ async def get_post_detail(session: AsyncSession, urn: str, settings=None) -> dic
             top = find_similar(target_vec, all_embeddings, top_k=5, exclude_post_id=post.id)
             if top:
                 post_ids = [pid for pid, _ in top]
-                scores = {pid: score for pid, score in top}
+                scores = dict(top)
                 rows = await session.scalars(select(Post).where(Post.id.in_(post_ids)))
                 for p in rows:
                     similar_posts.append(
@@ -317,9 +367,17 @@ async def get_post_detail(session: AsyncSession, urn: str, settings=None) -> dic
 # ── Authors ───────────────────────────────────────────────────────────────────
 
 
-async def list_authors(
-    session: AsyncSession, limit: int = 50, offset: int = 0
-) -> list[dict]:
+async def list_authors(session: AsyncSession, limit: int = 50, offset: int = 0) -> list[dict]:
+    """Retrieve top authors, ordered by post count.
+
+    Args:
+        session: Active SQLAlchemy database session.
+        limit: Max number of authors to return (defaults to 50).
+        offset: Offset for pagination (defaults to 0).
+
+    Returns:
+        A list of author dictionary representations.
+    """
     rows = await session.scalars(
         select(Author).order_by(Author.post_count.desc()).offset(offset).limit(limit)
     )
@@ -336,6 +394,17 @@ async def list_authors(
 
 
 async def get_author_detail(session: AsyncSession, slug: str) -> dict | None:
+    """Fetch detailed profile for a single author, matching by slug.
+
+    Includes their top topics and recent posts.
+
+    Args:
+        session: Active SQLAlchemy database session.
+        slug: The unique author URL slug.
+
+    Returns:
+        A detailed author dictionary, or None if the author is not found.
+    """
     author = await session.scalar(select(Author).where(Author.slug == slug))
     if not author:
         return None
@@ -354,10 +423,7 @@ async def get_author_detail(session: AsyncSession, slug: str) -> dict | None:
 
     # Posts
     post_rows = await session.scalars(
-        select(Post)
-        .where(Post.author == author.name)
-        .order_by(Post.created_at.desc())
-        .limit(50)
+        select(Post).where(Post.author == author.name).order_by(Post.created_at.desc()).limit(50)
     )
     posts = [
         {
@@ -387,10 +453,24 @@ async def get_author_detail(session: AsyncSession, slug: str) -> dict | None:
 async def semantic_search(
     session: AsyncSession,
     query: str,
-    settings,
+    settings: Settings,
     topic: str | None = None,
     limit: int = 20,
 ) -> list[dict]:
+    """Perform a semantic search for posts similar to the query string.
+
+    Falls back to a keyword-like LIKE search if embeddings are not available.
+
+    Args:
+        session: Active SQLAlchemy database session.
+        query: The search query text.
+        settings: Application settings.
+        topic: Optional topic filter name.
+        limit: Max number of results to return (defaults to 20).
+
+    Returns:
+        A list of matching post dictionaries with relevance scores.
+    """
     from socialgraph.knowledge.search import (
         embed_query,
         find_similar,
@@ -421,7 +501,7 @@ async def semantic_search(
 
             top = find_similar(qvec, filtered, top_k=limit)
             post_ids = [pid for pid, _ in top]
-            scores = {pid: sc for pid, sc in top}
+            scores = dict(top)
             rows = await session.scalars(
                 select(Post)
                 .where(Post.id.in_(post_ids))
@@ -464,15 +544,37 @@ async def semantic_search(
 
 # 19 distinct topic colors (hue-shifted for visual variety)
 TOPIC_COLORS = [
-    "#6366f1", "#8b5cf6", "#a855f7", "#d946ef", "#ec4899",
-    "#f43f5e", "#ef4444", "#f97316", "#f59e0b", "#eab308",
-    "#84cc16", "#22c55e", "#10b981", "#14b8a6", "#06b6d4",
-    "#0ea5e9", "#3b82f6", "#6366f1", "#8b5cf6",
+    "#6366f1",
+    "#8b5cf6",
+    "#a855f7",
+    "#d946ef",
+    "#ec4899",
+    "#f43f5e",
+    "#ef4444",
+    "#f97316",
+    "#f59e0b",
+    "#eab308",
+    "#84cc16",
+    "#22c55e",
+    "#10b981",
+    "#14b8a6",
+    "#06b6d4",
+    "#0ea5e9",
+    "#3b82f6",
+    "#6366f1",
+    "#8b5cf6",
 ]
 
 
 async def get_graph_data(session: AsyncSession) -> dict:
-    """Build D3-compatible {nodes, links} from graph_nodes + graph_edges."""
+    """Build D3-compatible {nodes, links} from graph_nodes + graph_edges.
+
+    Args:
+        session: Active SQLAlchemy database session.
+
+    Returns:
+        A dictionary containing "nodes" and "links" lists for visualization.
+    """
     # Load all graph nodes
     all_nodes = await session.scalars(select(GraphNodeModel))
     nodes_list = list(all_nodes.all())
@@ -514,23 +616,27 @@ async def get_graph_data(session: AsyncSession) -> dict:
     # Build output
     out_nodes = []
     for n in topic_nodes:
-        out_nodes.append({
-            "id": n.node_id,
-            "label": n.label,
-            "type": "topic",
-            "size": edge_count.get(n.id, 1),
-            "color": topic_color_map.get(n.node_id, "#6366f1"),
-        })
+        out_nodes.append(
+            {
+                "id": n.node_id,
+                "label": n.label,
+                "type": "topic",
+                "size": edge_count.get(n.id, 1),
+                "color": topic_color_map.get(n.node_id, "#6366f1"),
+            }
+        )
     for n in top_post_nodes:
         topic_id = post_topic_map.get(n.id)
-        out_nodes.append({
-            "id": n.node_id,
-            "label": n.label[:60],
-            "type": "post",
-            "size": 1,
-            "color": topic_color_map.get(topic_id, "#555") if topic_id else "#555",
-            "topic": topic_id,
-        })
+        out_nodes.append(
+            {
+                "id": n.node_id,
+                "label": n.label[:60],
+                "type": "post",
+                "size": 1,
+                "color": topic_color_map.get(topic_id, "#555") if topic_id else "#555",
+                "topic": topic_id,
+            }
+        )
 
     # Node ID to node_id string mapping
     id_to_node_id = {n.id: n.node_id for n in nodes_list}
@@ -541,11 +647,13 @@ async def get_graph_data(session: AsyncSession) -> dict:
             src = id_to_node_id.get(e.source_node_id)
             tgt = id_to_node_id.get(e.target_node_id)
             if src and tgt:
-                out_links.append({
-                    "source": src,
-                    "target": tgt,
-                    "weight": e.confidence_score,
-                    "relation": e.relation,
-                })
+                out_links.append(
+                    {
+                        "source": src,
+                        "target": tgt,
+                        "weight": e.confidence_score,
+                        "relation": e.relation,
+                    }
+                )
 
     return {"nodes": out_nodes, "links": out_links}

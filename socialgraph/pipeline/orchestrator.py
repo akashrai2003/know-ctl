@@ -1,8 +1,10 @@
+"""Pipeline orchestrator for running stages in sequence."""
+
 from __future__ import annotations
 
 import uuid
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -10,7 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from socialgraph.agents.base import Agent, StageContext, StageOutput
 from socialgraph.config.settings import Settings
 from socialgraph.storage.db import get_session
+from socialgraph.storage.enums import PostStatus
 from socialgraph.storage.repo import Repo
+
+UTC = timezone.utc
 
 logger = structlog.get_logger(__name__)
 
@@ -97,15 +102,14 @@ class PipelineOrchestrator:
                 logger.error("pipeline.stage_all_failed", stage=stage_name)
                 break
 
-        status = "ok" if all(o.failed == 0 for o in results) else "partial"
+        status = PostStatus.OK.value if all(o.failed == 0 for o in results) else "partial"
         async with get_session(self._factory) as session:
             run_record = await Repo(session).get_pipeline_run(run_id)
             if run_record:
                 import json
-                run_record.stage_counts_json = json.dumps(
-                    {o.stage: asdict(o) for o in results}
-                )
+
+                run_record.stage_counts_json = json.dumps({o.stage: asdict(o) for o in results})
                 run_record.status = status
-                run_record.completed_at = datetime.utcnow()
+                run_record.completed_at = datetime.now(UTC)
 
         return PipelineResult(run_id=run_id, stages=results, status=status)

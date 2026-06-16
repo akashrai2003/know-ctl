@@ -29,7 +29,7 @@ class Taxonomy:
         self._alias_index: dict[str, str] = {}
         for t in topics:
             self._alias_index[t.name.lower()] = t.name
-            for alias in (t.aliases or []):
+            for alias in t.aliases or []:
                 self._alias_index[alias.lower()] = t.name
 
     @classmethod
@@ -68,7 +68,7 @@ class Taxonomy:
     def add_topic(self, topic: TopicDefinition) -> None:
         self._topics.append(topic)
         self._alias_index[topic.name.lower()] = topic.name
-        for alias in (topic.aliases or []):
+        for alias in topic.aliases or []:
             self._alias_index[alias.lower()] = topic.name
 
     def save(self, path: Path) -> None:

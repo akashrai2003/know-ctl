@@ -1,4 +1,5 @@
 """Integration test: LinkedIn JSON connector."""
+
 from __future__ import annotations
 
 import json

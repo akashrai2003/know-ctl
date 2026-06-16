@@ -1,4 +1,5 @@
 """Semantic search utilities: cosine similarity, query embedding, nearest neighbors."""
+
 from __future__ import annotations
 
 import json
@@ -85,9 +86,7 @@ def get_local_model(model_name: str, device: str):
     return _local_model
 
 
-async def embed_texts_local(
-    texts: list[str], model_name: str, device: str
-) -> list[list[float]]:
+async def embed_texts_local(texts: list[str], model_name: str, device: str) -> list[list[float]]:
     """Generate embeddings locally on a separate thread via asyncio.to_thread."""
     import asyncio
 
@@ -120,6 +119,7 @@ def find_similar(
 async def load_embeddings(session) -> list[tuple[int, list[float]]]:  # type: ignore[type-arg]
     """Load all post embeddings from DB as (post_id, vector) tuples."""
     from socialgraph.storage.models import Embedding
+
     rows = await session.scalars(select(Embedding))
     result = []
     for row in rows:
@@ -134,10 +134,9 @@ async def load_embeddings(session) -> list[tuple[int, list[float]]]:  # type: ig
 async def keyword_search(session, query: str, limit: int = 10) -> list[Post]:
     """Simple LIKE-based full-text fallback when embeddings are unavailable."""
     from socialgraph.storage.models import Post
+
     pattern = f"%{query}%"
     result = await session.scalars(
-        select(Post)
-        .where(Post.content.like(pattern) | Post.title.like(pattern))
-        .limit(limit)
+        select(Post).where(Post.content.like(pattern) | Post.title.like(pattern)).limit(limit)
     )
     return list(result.all())

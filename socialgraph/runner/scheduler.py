@@ -2,6 +2,7 @@
 
 Runs the incremental pipeline on a configurable cadence using APScheduler.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -11,7 +12,7 @@ import os
 import signal
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import structlog
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -19,6 +20,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from socialgraph.config.settings import Settings
 from socialgraph.runner.incremental import run_incremental_pipeline
+
+UTC = timezone.utc
 
 logger = structlog.get_logger(__name__)
 
@@ -32,8 +35,9 @@ class SchedulerDaemon:
 
     def start(self, interval_hours: float) -> None:
         """Start the background scheduler and block until stopped."""
+
         # Setup signal handlers for graceful shutdown on SIGTERM
-        def handle_sigterm(signum, frame):
+        def handle_sigterm(_signum, _frame):
             logger.info("scheduler.sigterm_received")
             self.stop()
 
@@ -81,8 +85,8 @@ class SchedulerDaemon:
     def run_job(self) -> None:
         """The scheduled task executed on each tick."""
         logger.info("scheduler.job_triggered")
-        last_run = datetime.utcnow().isoformat()
-        
+        last_run = datetime.now(UTC).isoformat()
+
         # Trigger knows next run time
         next_run = None
         for job in self._scheduler.get_jobs():

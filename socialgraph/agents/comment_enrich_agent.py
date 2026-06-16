@@ -15,6 +15,7 @@ agent:
 Run with:
     sg comment-enrich
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +25,7 @@ from typing import TYPE_CHECKING
 
 import httpx
 import structlog
-from playwright.async_api import async_playwright
+from playwright.async_api import Browser, async_playwright
 from sqlalchemy import select
 
 from socialgraph.agents.base import StageContext, StageOutput
@@ -34,6 +35,7 @@ from socialgraph.agents.enrich_agent import (
     _resolve_and_fetch,
     should_fetch_url,
 )
+from socialgraph.storage.enums import FetchStatus
 from socialgraph.storage.models import Comment, ExternalLink, PostExternalLink
 from socialgraph.storage.repo import Repo
 
@@ -61,7 +63,7 @@ class CommentEnrichAgent:
         # ── 1. Load unprocessed comments that mention a URL ──────────────
         q = select(Comment).where(
             Comment.has_external_url == True,  # noqa: E712
-            Comment.urls_enriched == False,    # noqa: E712
+            Comment.urls_enriched == False,  # noqa: E712
         )
         if self._limit:
             q = q.limit(self._limit)
@@ -71,7 +73,9 @@ class CommentEnrichAgent:
 
         if not comments:
             logger.info("comment_enrich.skip", reason="no unprocessed comments with URLs")
-            return StageOutput(stage=self.name, skipped=1, meta={"reason": "no comments to process"})
+            return StageOutput(
+                stage=self.name, skipped=1, meta={"reason": "no comments to process"}
+            )
 
         logger.info("comment_enrich.start", count=len(comments))
 
@@ -124,9 +128,7 @@ class CommentEnrichAgent:
 
         # ── 2. LLM summarization pass (comment-aware) ────────────────────
         if self._router and needs_summary:
-            log_path = (
-                Path(ctx.settings.workspace_dir) / "logs" / "comment_summarization.jsonl"
-            )
+            log_path = Path(ctx.settings.workspace_dir) / "logs" / "comment_summarization.jsonl"
             await _summarize_comment_links(ctx.db, self._router, needs_summary, log_path)
             await ctx.db.commit()
 
@@ -199,7 +201,7 @@ async def _process_comment(
     comment: Comment,
     repo: Repo,
     client: httpx.AsyncClient,
-    browser,
+    browser: Browser,
     pw_sem: asyncio.Semaphore,
     db_sem: asyncio.Semaphore,
 ) -> list[int]:
@@ -217,19 +219,19 @@ async def _process_comment(
 
         # ── get-or-create ExternalLink (serialised) ──────────────────────
         async with db_sem:
-            link, created = await repo.get_or_create_external_link(url)
+            link, _ = await repo.get_or_create_external_link(url)
             link_id = link.id
-            needs_fetch = link.fetch_status == "pending"
+            needs_fetch = link.fetch_status == FetchStatus.PENDING.value
             if needs_fetch:
-                link.fetch_status = "fetching"
-                await repo._s.flush()
+                link.fetch_status = FetchStatus.FETCHING.value
+                await repo.flush()
             # Link this URL to the post (skip if already linked from body)
             await repo.link_comment_url(comment.post_id, link_id, comment.id)
 
         if not needs_fetch:
             # URL already fetched — queue for summary only if it has content but no summary
             async with db_sem:
-                lnk = await repo._s.get(ExternalLink, link_id)
+                lnk = await repo.get(ExternalLink, link_id)
                 if lnk and lnk.body_excerpt and lnk.ai_summary is None:
                     new_link_ids.append(link_id)
             continue
@@ -239,7 +241,7 @@ async def _process_comment(
 
         # ── write fetch result back (serialised) ─────────────────────────
         async with db_sem:
-            lnk = await repo._s.get(ExternalLink, link_id)
+            lnk = await repo.get(ExternalLink, link_id)
             if lnk is None:
                 continue
             lnk.fetch_status = data["fetch_status"]
@@ -248,15 +250,15 @@ async def _process_comment(
             lnk.body_excerpt = data.get("body_excerpt")
             lnk.error_reason = data.get("error_reason")
             lnk.fetched_at = data.get("fetched_at")
-            await repo._s.flush()
+            await repo.flush()
 
-            if lnk.fetch_status == "ok" and lnk.body_excerpt:
+            if lnk.fetch_status == FetchStatus.OK.value and lnk.body_excerpt:
                 new_link_ids.append(link_id)
 
     # Mark comment as processed (even if no URLs were usable)
     async with db_sem:
         comment.urls_enriched = True
-        await repo._s.flush()
+        await repo.flush()
 
     return new_link_ids
 
@@ -289,7 +291,12 @@ async def _summarize_comment_links(
     comment_for: dict[int, Comment] = {}
     for lid, comment in seen.items():
         lnk = await db.get(ExternalLink, lid)
-        if lnk and lnk.fetch_status == "ok" and lnk.body_excerpt and lnk.ai_summary is None:
+        if (
+            lnk
+            and lnk.fetch_status == FetchStatus.OK.value
+            and lnk.body_excerpt
+            and lnk.ai_summary is None
+        ):
             link_objects.append(lnk)
             comment_for[lnk.id] = comment
 
@@ -319,10 +326,12 @@ async def _summarize_comment_links(
                     url=lnk.url,
                     excerpt=excerpt,
                 )
-                messages_list.append([
-                    {"role": "system", "content": SUMMARIZE_COMMENT_LINK_SYSTEM},
-                    {"role": "user", "content": user_msg},
-                ])
+                messages_list.append(
+                    [
+                        {"role": "system", "content": SUMMARIZE_COMMENT_LINK_SYSTEM},
+                        {"role": "user", "content": user_msg},
+                    ]
+                )
             try:
                 results = await batch_client.batch_chat(
                     messages_list, temperature=0.1, max_tokens=400

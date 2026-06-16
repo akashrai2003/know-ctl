@@ -4,12 +4,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from socialgraph.storage.models import Base
 
 
-def build_engine(db_path: Path):
+def build_engine(db_path: Path) -> AsyncEngine:
     db_url = f"sqlite+aiosqlite:///{db_path}"
     return create_async_engine(db_url, echo=False, future=True)
 

@@ -1,4 +1,5 @@
 """Unit tests for taxonomy module."""
+
 from __future__ import annotations
 
 import json
@@ -13,7 +14,11 @@ from socialgraph.knowledge.taxonomy import Taxonomy, TopicDefinition
 def taxonomy(tmp_path: Path) -> Taxonomy:
     data = {
         "topics": [
-            {"name": "Local LLMs", "description": "Self-hosted models", "aliases": ["local models", "self-hosted llms"]},
+            {
+                "name": "Local LLMs",
+                "description": "Self-hosted models",
+                "aliases": ["local models", "self-hosted llms"],
+            },
             {"name": "Kubernetes", "description": "Container orchestration", "aliases": ["k8s"]},
         ]
     }
@@ -46,7 +51,9 @@ def test_resolve_unknown_returns_none(taxonomy: Taxonomy):
 
 
 def test_add_topic(taxonomy: Taxonomy):
-    taxonomy.add_topic(TopicDefinition(name="Edge AI", description="AI on edge devices", aliases=["tinyml"]))
+    taxonomy.add_topic(
+        TopicDefinition(name="Edge AI", description="AI on edge devices", aliases=["tinyml"])
+    )
     assert "Edge AI" in taxonomy.topic_names
     assert taxonomy.resolve("tinyml") == "Edge AI"
 

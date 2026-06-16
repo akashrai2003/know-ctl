@@ -36,6 +36,16 @@ test-integration: ## Run integration tests (requires .env)
 test-e2e: ## Run end-to-end pipeline test
 	pytest tests/e2e/ -v -s
 
+typecheck: ## Run mypy type checking
+	mypy socialgraph
+
+coverage: ## Run tests with coverage report
+	pytest -v --cov=socialgraph --cov-report=html
+	@echo "Open htmlcov/index.html to view"
+
+ci: lint typecheck test  ## Run all CI checks locally
+
+
 bootstrap-taxonomy: ## Build initial topic taxonomy from sampled posts
 	$(PYTHON) scripts/bootstrap_taxonomy.py
 

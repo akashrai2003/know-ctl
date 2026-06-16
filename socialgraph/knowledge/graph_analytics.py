@@ -1,4 +1,5 @@
 """Graph analytics: stats, co-occurrence, author profiles, timeline."""
+
 from __future__ import annotations
 
 import re
@@ -51,6 +52,7 @@ async def get_stats(session: AsyncSession) -> dict[str, Any]:
 async def get_co_occurrence(session: AsyncSession, top_n: int = 20) -> list[dict[str, Any]]:
     """Return top topic-pair co-occurrence counts."""
     from socialgraph.storage.models import PostTopic, Topic
+
     # Get all (post_id, topic_name) pairs
     rows = await session.execute(
         select(PostTopic.post_id, Topic.name).join(Topic, PostTopic.topic_id == Topic.id)
@@ -67,8 +69,7 @@ async def get_co_occurrence(session: AsyncSession, top_n: int = 20) -> list[dict
                 pair_counts[(unique[i], unique[j])] += 1
 
     return [
-        {"topic_a": a, "topic_b": b, "count": c}
-        for (a, b), c in pair_counts.most_common(top_n)
+        {"topic_a": a, "topic_b": b, "count": c} for (a, b), c in pair_counts.most_common(top_n)
     ]
 
 
@@ -115,9 +116,18 @@ def _parse_month(date_raw: str | None) -> str | None:
     m = re.search(r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{4})", date_raw)
     if m:
         month_map = {
-            "Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04",
-            "May": "05", "Jun": "06", "Jul": "07", "Aug": "08",
-            "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12",
+            "Jan": "01",
+            "Feb": "02",
+            "Mar": "03",
+            "Apr": "04",
+            "May": "05",
+            "Jun": "06",
+            "Jul": "07",
+            "Aug": "08",
+            "Sep": "09",
+            "Oct": "10",
+            "Nov": "11",
+            "Dec": "12",
         }
         return f"{m.group(2)}-{month_map[m.group(1)]}"
     # "2025-01-15" or similar ISO formats
@@ -153,7 +163,4 @@ async def get_timeline(
         if month:
             month_counts[month] += 1
 
-    return [
-        {"month": month, "count": count}
-        for month, count in sorted(month_counts.items())
-    ]
+    return [{"month": month, "count": count} for month, count in sorted(month_counts.items())]

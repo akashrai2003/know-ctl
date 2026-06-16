@@ -6,19 +6,12 @@ import time
 import openai
 import structlog
 
+from socialgraph.utils import msg_preview as _msg_preview
+
 logger = structlog.get_logger(__name__)
 
 # Groq error codes that mean "try the next model"
 _RATE_LIMIT_CODES = {429, 503, 529}
-
-
-def _msg_preview(messages: list[dict], max_chars: int = 300) -> str:
-    """Return a short preview of the last user message for log context."""
-    for msg in reversed(messages):
-        if msg.get("role") == "user":
-            content = msg.get("content", "")
-            return content[:max_chars] + ("…" if len(content) > max_chars else "")
-    return ""
 
 
 class GroqClient:
@@ -44,6 +37,19 @@ class GroqClient:
         response_format: dict | None = None,
         temperature: float = 0.0,
     ) -> str | dict | None:
+        """Perform a synchronous chat completion request using the Groq API.
+
+        Attempts fallback to alternative models if rate limits or status errors occur.
+
+        Args:
+            messages: List of chat messages representing the prompt.
+            response_format: Optional OpenAI-compatible response format dictionary.
+            temperature: Sampling temperature (defaults to 0.0).
+
+        Returns:
+            The parsed JSON response if response_format is provided, the string
+            content if unstructured, or None if the request failed across all models.
+        """
         last_exc: Exception | None = None
         logger.debug(
             "llm.request",
@@ -78,26 +84,39 @@ class GroqClient:
                     "llm.response_content",
                     provider="groq",
                     model=model,
-                    output_preview=content[:300] + ("…" if content and len(content) > 300 else "") if content else None,
+                    output_preview=content[:300] + ("…" if content and len(content) > 300 else "")
+                    if content
+                    else None,
                 )
                 if response_format:
                     return json.loads(content)
                 return content
             except openai.RateLimitError as exc:
                 latency_ms = round((time.monotonic() - t0) * 1000)
-                logger.warning("groq.rate_limit", model=model, latency_ms=latency_ms, error=str(exc))
+                logger.warning(
+                    "groq.rate_limit", model=model, latency_ms=latency_ms, error=str(exc)
+                )
                 last_exc = exc
             except openai.APIStatusError as exc:
                 latency_ms = round((time.monotonic() - t0) * 1000)
                 if exc.status_code in _RATE_LIMIT_CODES:
-                    logger.warning("groq.quota_error", model=model, status=exc.status_code, latency_ms=latency_ms)
+                    logger.warning(
+                        "groq.quota_error",
+                        model=model,
+                        status=exc.status_code,
+                        latency_ms=latency_ms,
+                    )
                     last_exc = exc
                 else:
-                    logger.error("groq.complete_failed", model=model, latency_ms=latency_ms, error=str(exc))
+                    logger.error(
+                        "groq.complete_failed", model=model, latency_ms=latency_ms, error=str(exc)
+                    )
                     return None
             except Exception as exc:
                 latency_ms = round((time.monotonic() - t0) * 1000)
-                logger.error("groq.complete_failed", model=model, latency_ms=latency_ms, error=str(exc))
+                logger.error(
+                    "groq.complete_failed", model=model, latency_ms=latency_ms, error=str(exc)
+                )
                 return None
         logger.error("groq.all_models_failed", models=self._models, error=str(last_exc))
         return None
