@@ -30,7 +30,7 @@ Social Graph automates fetching saved posts, downloading linked external article
 ### Installation
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/social-graph.git
+git clone https://github.com/akashrai2003/social-graph.git
 cd social-graph
 
 # Set up virtual environment and install dependencies
