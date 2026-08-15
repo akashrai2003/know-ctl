@@ -6,7 +6,7 @@ import structlog
 from sqlalchemy import select
 
 from socialgraph.agents.base import StageContext, StageOutput
-from socialgraph.knowledge.search import find_similar, load_embeddings
+from socialgraph.knowledge.search import build_similarity_map, load_embeddings
 from socialgraph.storage.models import GraphNode, Post
 from socialgraph.storage.repo import Repo
 
@@ -49,21 +49,18 @@ class SemanticEdgeAgent:
         repo = Repo(ctx.db)
         created = skipped = 0
 
-        for post_id, vector in all_embeddings:
-            similar = find_similar(
-                vector,
-                all_embeddings,
-                top_k=TOP_K_PER_POST,
-                exclude_post_id=post_id,
-            )
+        similarity_map = build_similarity_map(
+            all_embeddings, top_k=TOP_K_PER_POST, min_score=self._threshold
+        )
+
+        for post_id, _ in all_embeddings:
+            similar = similarity_map.get(post_id, [])
             src_nid = _node_id(post_id)
             src_node = nodes.get(src_nid)
             if not src_node:
                 continue
 
             for other_post_id, score in similar:
-                if score < self._threshold:
-                    break  # sorted descending, so we can stop early
                 tgt_nid = _node_id(other_post_id)
                 tgt_node = nodes.get(tgt_nid)
                 if not tgt_node:

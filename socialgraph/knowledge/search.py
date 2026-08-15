@@ -107,13 +107,97 @@ def find_similar(
     exclude_post_id: int | None = None,
 ) -> list[tuple[int, float]]:
     """Return top-k (post_id, score) pairs by cosine similarity, descending."""
-    scored = [
-        (post_id, cosine_similarity(target_vector, vec))
-        for post_id, vec in embeddings
-        if post_id != exclude_post_id
-    ]
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[:top_k]
+    if not target_vector or not embeddings:
+        return []
+
+    try:
+        import numpy as np
+
+        target = np.array(target_vector, dtype=np.float32)
+        target_norm = np.linalg.norm(target)
+        if target_norm == 0:
+            return []
+        target = target / target_norm
+
+        post_ids = []
+        vecs = []
+        for pid, vec in embeddings:
+            if pid != exclude_post_id and len(vec) == len(target_vector):
+                post_ids.append(pid)
+                vecs.append(vec)
+
+        if not vecs:
+            return []
+
+        matrix = np.array(vecs, dtype=np.float32)
+        norms = np.linalg.norm(matrix, axis=1, keepdims=True)
+        norms[norms == 0] = 1e-10
+        matrix = matrix / norms
+
+        sims = np.dot(matrix, target)
+
+        if len(sims) <= top_k:
+            top_indices = np.argsort(-sims)
+        else:
+            top_indices = np.argpartition(-sims, top_k)[:top_k]
+            top_indices = top_indices[np.argsort(-sims[top_indices])]
+
+        return [(post_ids[i], float(sims[i])) for i in top_indices]
+    except Exception:
+        scored = [
+            (post_id, cosine_similarity(target_vector, vec))
+            for post_id, vec in embeddings
+            if post_id != exclude_post_id
+        ]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:top_k]
+
+
+def build_similarity_map(
+    embeddings: list[tuple[int, list[float]]],
+    top_k: int = 5,
+    min_score: float = 0.85,
+) -> dict[int, list[tuple[int, float]]]:
+    """Pre-compute top-k similar post pairs for all embeddings using vectorized matrix math."""
+    if len(embeddings) < 2:
+        return {}
+
+    try:
+        import numpy as np
+
+        post_ids = np.array([pid for pid, _ in embeddings])
+        vec_matrix = np.array([vec for _, vec in embeddings], dtype=np.float32)
+
+        norms = np.linalg.norm(vec_matrix, axis=1, keepdims=True)
+        norms[norms == 0] = 1e-10
+        norm_matrix = vec_matrix / norms
+
+        sim_matrix = np.dot(norm_matrix, norm_matrix.T)
+
+        result: dict[int, list[tuple[int, float]]] = {}
+        for i, pid in enumerate(post_ids):
+            sims = sim_matrix[i].copy()
+            sims[i] = -1.0  # exclude self
+            if len(sims) <= top_k:
+                top_idx = np.argsort(-sims)
+            else:
+                top_idx = np.argpartition(-sims, top_k)[:top_k]
+                top_idx = top_idx[np.argsort(-sims[top_idx])]
+
+            matches = [(int(post_ids[j]), float(sims[j])) for j in top_idx if sims[j] >= min_score]
+            if matches:
+                result[int(pid)] = matches
+        return result
+    except Exception as exc:
+        logger.warning("build_similarity_map.matrix_failed", error=str(exc))
+        res = {}
+        for pid, vec in embeddings:
+            sims = find_similar(vec, embeddings, top_k=top_k, exclude_post_id=pid)
+            filtered = [(other_id, score) for other_id, score in sims if score >= min_score]
+            if filtered:
+                res[pid] = filtered
+        return res
+
 
 
 async def load_embeddings(session) -> list[tuple[int, list[float]]]:  # type: ignore[type-arg]

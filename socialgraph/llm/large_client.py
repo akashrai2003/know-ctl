@@ -63,6 +63,8 @@ class GroqClient:
             kwargs: dict = {"model": model, "messages": messages, "temperature": temperature}
             if response_format:
                 kwargs["response_format"] = response_format
+                if "qwen" in model.lower():
+                    kwargs["extra_body"] = {"reasoning_effort": "none"}
             t0 = time.monotonic()
             try:
                 resp = self._client.chat.completions.create(**kwargs)
@@ -89,7 +91,10 @@ class GroqClient:
                     else None,
                 )
                 if response_format:
-                    return json.loads(content)
+                    clean_content = content.strip()
+                    if clean_content.startswith("```"):
+                        clean_content = clean_content.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                    return json.loads(clean_content)
                 return content
             except openai.RateLimitError as exc:
                 latency_ms = round((time.monotonic() - t0) * 1000)
@@ -99,24 +104,19 @@ class GroqClient:
                 last_exc = exc
             except openai.APIStatusError as exc:
                 latency_ms = round((time.monotonic() - t0) * 1000)
-                if exc.status_code in _RATE_LIMIT_CODES:
-                    logger.warning(
-                        "groq.quota_error",
-                        model=model,
-                        status=exc.status_code,
-                        latency_ms=latency_ms,
-                    )
-                    last_exc = exc
-                else:
-                    logger.error(
-                        "groq.complete_failed", model=model, latency_ms=latency_ms, error=str(exc)
-                    )
-                    return None
+                logger.warning(
+                    "groq.model_error",
+                    model=model,
+                    status=exc.status_code,
+                    latency_ms=latency_ms,
+                    error=str(exc),
+                )
+                last_exc = exc
             except Exception as exc:
                 latency_ms = round((time.monotonic() - t0) * 1000)
-                logger.error(
-                    "groq.complete_failed", model=model, latency_ms=latency_ms, error=str(exc)
+                logger.warning(
+                    "groq.model_failed", model=model, latency_ms=latency_ms, error=str(exc)
                 )
-                return None
+                last_exc = exc
         logger.error("groq.all_models_failed", models=self._models, error=str(last_exc))
         return None

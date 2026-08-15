@@ -55,14 +55,14 @@ class VaultWriteAgent:
             return StageOutput(stage=self.name, skipped=1, meta={"reason": "no graphed posts"})
 
         # Load all embeddings if available for similar posts check
-        from socialgraph.knowledge.search import find_similar, load_embeddings
+        from socialgraph.knowledge.search import build_similarity_map, load_embeddings
 
         all_embeddings = []
         try:
             all_embeddings = await load_embeddings(ctx.db)
         except Exception as e:
             logger.warning("vault_write.embeddings_load_failed", error=str(e))
-        embedding_map = dict(all_embeddings)
+        similarity_map = build_similarity_map(all_embeddings, top_k=5, min_score=0.85)
         posts_by_id = {p.id: p for p in posts}
 
         # Clear/re-populate the authors DB table
@@ -155,21 +155,14 @@ class VaultWriteAgent:
 
             # Cosine similarity matching
             related_posts = []
-            if post.id in embedding_map:
-                similar = find_similar(
-                    embedding_map[post.id],
-                    all_embeddings,
-                    top_k=5,
-                    exclude_post_id=post.id,
-                )
-                for other_id, score in similar:
-                    if score >= 0.85:
-                        other_post = posts_by_id.get(other_id)
-                        if other_post:
-                            tail = other_post.urn.split(":")[-1]
-                            other_title = other_post.title or (other_post.content[:50] + "...")
-                            other_title = other_title.replace('"', "").replace("\n", " ").strip()
-                            related_posts.append(f"[[post_{tail}|{other_title}]]")
+            if post.id in similarity_map:
+                for other_id, score in similarity_map[post.id]:
+                    other_post = posts_by_id.get(other_id)
+                    if other_post:
+                        tail = other_post.urn.split(":")[-1]
+                        other_title = other_post.title or (other_post.content[:50] + "...")
+                        other_title = other_title.replace('"', "").replace("\n", " ").strip()
+                        related_posts.append(f"[[post_{tail}|{other_title}]]")
 
             try:
                 note_content = render_post_note(
