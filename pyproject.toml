@@ -72,6 +72,9 @@ dependencies = [
 
     # Scheduler (M6)
     "apscheduler>=3.10",
+
+    # Encryption for stored credentials (M8)
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]

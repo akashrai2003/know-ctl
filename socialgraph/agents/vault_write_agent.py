@@ -156,7 +156,7 @@ class VaultWriteAgent:
             # Cosine similarity matching
             related_posts = []
             if post.id in similarity_map:
-                for other_id, score in similarity_map[post.id]:
+                for other_id, _score in similarity_map[post.id]:
                     other_post = posts_by_id.get(other_id)
                     if other_post:
                         tail = other_post.urn.split(":")[-1]

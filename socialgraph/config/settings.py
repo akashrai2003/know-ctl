@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     # ── LinkedIn browser credentials ─────────────────────────────────────
     linkedin_email: str = Field(default="")
     linkedin_password: str = Field(default="")
+    linkedin_cookie: str = Field(default="", description="LinkedIn li_at session cookie")
 
     # ── Paths ────────────────────────────────────────────────────────────
     db_path: Path = Field(default=Path(".socialgraph/socialgraph.db"))
@@ -89,3 +90,65 @@ class Settings(BaseSettings):
         (self.obsidian_vault_path / "posts").mkdir(exist_ok=True)
         (self.obsidian_vault_path / "topics").mkdir(exist_ok=True)
         (self.obsidian_vault_path / "authors").mkdir(exist_ok=True)
+
+    @classmethod
+    async def from_db(cls, db_path: Path | None = None) -> Settings:
+        """Load settings, merging DB-stored config on top of env/.env defaults.
+
+        DB values take precedence over .env so users who configured from the
+        web UI don't need to manage the .env file at all.
+        """
+        # Start with env/file-based defaults
+        base = cls()
+        if db_path is None:
+            db_path = base.db_path
+
+        if not db_path.exists():
+            return base
+
+        try:
+            from sqlalchemy.ext.asyncio import (
+                AsyncSession,
+                async_sessionmaker,
+                create_async_engine,
+            )
+
+            engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+            factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+            async with factory() as session:
+                from socialgraph.storage.config_store import ConfigStore
+
+                store = ConfigStore(session)
+                db_vals = await store.get_all_decrypted()
+
+            await engine.dispose()
+
+            # Build a merged dict: start from base model_dump, overlay DB values
+            merged = base.model_dump()
+            str_to_path = {"db_path", "workspace_dir", "obsidian_vault_path", "taxonomy_path"}
+
+            for k, v in db_vals.items():
+                if k not in merged or not v:
+                    continue
+                target_type = type(merged[k])
+                try:
+                    if k in str_to_path:
+                        merged[k] = Path(v)
+                    elif target_type is int:
+                        merged[k] = int(v)
+                    elif target_type is float:
+                        merged[k] = float(v)
+                    elif target_type is bool:
+                        merged[k] = v.lower() in ("1", "true", "yes")
+                    else:
+                        merged[k] = v
+                except (ValueError, TypeError):
+                    pass  # keep default on bad DB value
+
+            # Re-construct with merged values (bypass env loading for DB-sourced fields)
+            return cls.model_validate(merged)
+
+        except Exception:
+            # If anything fails (DB not init'd, etc.), fall back to base settings
+            return base

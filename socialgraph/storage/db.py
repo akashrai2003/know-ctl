@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+# Import AppConfig to register its table on Base.metadata
+from socialgraph.storage.config_store import AppConfig as _AppConfig  # noqa: F401
 from socialgraph.storage.models import Base
 
 

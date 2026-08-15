@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Social Graph — Knowledge Dashboard</title>
-  <meta name="description" content="Browse, search and visualize your LinkedIn knowledge graph — topics, authors, posts and semantic connections.">
+  <title>Social Graph — LinkedIn Knowledge Dashboard</title>
+  <meta name="description" content="Transform your LinkedIn saved posts into a navigable knowledge graph. Browse topics, authors, posts, and run semantic search — all locally.">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
@@ -21,10 +21,17 @@
           <li><a href="#/topics" data-page="topics">Topics</a></li>
           <li><a href="#/authors" data-page="authors">Authors</a></li>
           <li><a href="#/graph" data-page="graph">Graph</a></li>
+          <li><a href="#/pipeline" data-page="pipeline" id="nav-pipeline">⚡ Pipeline</a></li>
+          <li><a href="#/settings" data-page="settings" id="nav-settings">⚙ Settings</a></li>
         </ul>
         <div class="navbar-search">
           <span class="search-icon">🔍</span>
           <input type="text" id="search-input" placeholder="Search posts..." autocomplete="off">
+        </div>
+        <!-- Pipeline status indicator -->
+        <div class="pipeline-indicator" id="pipeline-indicator" style="display:none">
+          <span class="pulse-dot"></span>
+          <span>Running</span>
         </div>
       </div>
     </nav>
@@ -32,6 +39,16 @@
     <!-- Main Content -->
     <main class="main-content" id="app"></main>
   </div>
+
+  <!-- Onboarding Wizard (hidden by default) -->
+  <div class="onboarding-overlay" id="onboarding-overlay" style="display:none">
+    <div class="onboarding-modal" id="onboarding-modal">
+      <!-- Injected by JS -->
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toast-container"></div>
 
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script src="/static/graph.js"></script>
