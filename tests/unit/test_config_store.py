@@ -66,3 +66,23 @@ async def test_is_configured(db_session: AsyncSession):
 
     await store.set("groq_api_key", "gsk_valid_key")
     assert await store.is_configured()
+
+
+def test_derive_fernet_key_headless_fallback(monkeypatch: pytest.MonkeyPatch):
+    import getpass
+
+    from socialgraph.storage.config_store import _derive_fernet_key, _get_username
+
+    # Simulate headless CI with no tty: getpass raises OSError
+    def _mock_getuser():
+        raise OSError(25, "Inappropriate ioctl for device")
+
+    monkeypatch.setattr(getpass, "getuser", _mock_getuser)
+    monkeypatch.setenv("USER", "runner")
+
+    user = _get_username()
+    assert user == "runner"
+
+    key = _derive_fernet_key()
+    assert isinstance(key, bytes)
+    assert len(key) == 44

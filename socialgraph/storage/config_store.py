@@ -60,13 +60,22 @@ SECRET_KEYS = {
 }
 
 
+def _get_username() -> str:
+    try:
+        import getpass
+
+        return getpass.getuser()
+    except Exception:
+        return os.environ.get("USER", os.environ.get("USERNAME", "user"))
+
+
 def _derive_fernet_key() -> bytes:
     """Derive a stable Fernet key from machine identity.
 
     Not vault-grade security, but appropriate for a local self-hosted tool.
     The key is deterministic per machine so data survives process restarts.
     """
-    identity = f"{socket.gethostname()}:{os.getlogin() if hasattr(os, 'getlogin') else 'user'}"
+    identity = f"{socket.gethostname()}:{_get_username()}"
     # Use an env override if the user wants a fixed key
     identity = os.environ.get("SG_ENCRYPTION_SEED", identity)
     digest = hashlib.sha256(identity.encode()).digest()
