@@ -1,6 +1,6 @@
 # Social Graph (know-ctl)
 
-Transform LinkedIn saved posts into an interactive, interconnected Obsidian knowledge graph.
+Transform saved posts from social media platforms into an interactive, interconnected Obsidian knowledge graph.
 
 [![CI](https://github.com/akashrai2003/know-ctl/actions/workflows/ci.yml/badge.svg)](https://github.com/akashrai2003/know-ctl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -10,24 +10,38 @@ Transform LinkedIn saved posts into an interactive, interconnected Obsidian know
 
 ## Overview
 
-Social Graph bridges social content consumption and personal knowledge management (PKM). It ingests your saved LinkedIn posts, crawls and extracts external web links, scrapes high-signal comments, generates local vector embeddings, maps topics using hybrid LLM routing (local models + Groq), detects communities via the Leiden algorithm, and outputs a linked Obsidian Markdown vault.
+Social Graph bridges social content consumption and personal knowledge management (PKM). It aggregates high-value saved posts and discussions across your social platforms, crawls and extracts referenced external web articles, scrapes discussion comments, generates local vector embeddings, maps topics using hybrid LLM routing (local models + Groq), clusters communities via the Leiden algorithm, and outputs a linked Obsidian Markdown vault.
 
-It includes a web application with an onboarding wizard, interactive settings dashboard, encrypted credential store, live pipeline runner terminal, and a D3 force-directed knowledge graph. No `.env` file or manual configuration required.
+While LinkedIn is the initial production connector, Social Graph is engineered as a universal social media knowledge aggregator. Notes are structured in platform-specific subtrees (`linkedin/`, `reddit/`, `x/`, `substack/`) with shared cross-platform topic graphs and semantic similarity links. **Reddit integration is next on the roadmap**, followed by X (Twitter) and Substack.
+
+The project includes a web application with an onboarding wizard, interactive settings dashboard, encrypted credential store, live pipeline runner terminal, and a D3 force-directed knowledge graph. No `.env` file or manual configuration required.
 
 ---
 
 ## Features
 
-- **Web Dashboard**: Web interface powered by FastAPI. Configure API keys, upload data files, inspect topics, authors, and graph clusters directly in your browser.
+- **Web Dashboard**: Browser interface powered by FastAPI. Configure API keys, upload data files, inspect topics, authors, and graph clusters directly in your browser.
 - **Encrypted Local Storage**: Machine-derived Fernet AES encryption stores credentials securely in local SQLite (`.socialgraph/socialgraph.db`).
+- **Multi-Platform Architecture**: Platform-partitioned knowledge storage (`linkedin/`, `reddit/`, `x/`) unified by cross-platform topic taxonomies and semantic search.
 - **Hybrid LLM Pipeline**:
   - **Local Models** (vLLM, llama.cpp, Ollama, LM Studio): High-throughput classification and batch subtopic detection. Automatically detects `/v1/chat/completions/batch` support and falls back to concurrent async requests when needed.
   - **Groq API**: High-speed reasoning with Qwen and Llama models for community clustering and graph synthesis.
-- **Dual Ingestion Modes**: Upload LinkedIn's official data archive JSON export, or live-scrape posts and comments using Playwright (email/password or `li_at` session cookie).
+- **Dual Ingestion Modes**: Upload official data archive JSON exports or live-scrape posts and comments using Playwright (credentials or session cookie).
 - **Deep URL and Comment Enrichment**: Crawls linked web pages with `trafilatura` and extracts thread discussions to retain full context.
 - **Local Vector Embeddings**: Generates embeddings locally using `sentence-transformers` with vectorized matrix similarity calculations.
 - **Obsidian Vault Synthesis**: Writes clean Markdown files with YAML frontmatter, bidirectional wikilinks (`[[post_...]]`), topic Maps of Content (MOCs), and author profiles.
 - **Model Context Protocol (MCP)**: Query your knowledge graph directly from Claude Desktop or custom AI agent workflows.
+
+---
+
+## Platform Support & Roadmap
+
+| Platform | Ingestion Method | Status | Target Path |
+|:---|:---|:---|:---|
+| **LinkedIn** | JSON archive export or live Playwright scraping | Supported (v0.1) | `vault/linkedin/` |
+| **Reddit** | Saved posts & saved comments (JSON / Reddit API) | Up Next (v0.2) | `vault/reddit/` |
+| **X (Twitter)** | Bookmarks export & thread scraping | Planned | `vault/x/` |
+| **Substack** | Reading list & saved newsletters | Planned | `vault/substack/` |
 
 ---
 
@@ -74,9 +88,9 @@ On first launch, an interactive wizard will guide you through:
 4. **LinkedIn Credentials** (optional): Email/password or session cookie (`li_at`) for live scraping.
 5. **Ready**: Upload your archive or trigger the pipeline.
 
-### 4. Upload LinkedIn Export Data
+### 4. Upload Data Export
 
-In the **Settings** tab, upload your `linkedin_saved_posts.json` archive:
+In the **Settings** tab, upload your saved posts JSON export:
 > LinkedIn -> Settings & Privacy -> Data Privacy -> Get a copy of your data -> select "Saved items".
 
 ### 5. Run the Pipeline
@@ -103,7 +117,7 @@ Values configured via the Web UI are stored in SQLite and take precedence over `
 ## Architecture
 
 ```text
- linkedin_saved_posts.json (or Playwright Live Scraping)
+ Saved Posts (JSON Export or Live Scraper)
                      |
                      v
              +---------------+
@@ -112,7 +126,7 @@ Values configured via the Web UI are stored in SQLite and take precedence over `
                      |
                      v
              +---------------+
-             | [2] Comments  | ---> Voyager API / DOM thread extraction
+             | [2] Comments  | ---> Comment threads & discussions
              +-------+-------+
                      |
                      v
@@ -137,7 +151,7 @@ Values configured via the Web UI are stored in SQLite and take precedence over `
                      |
                      v
              +---------------+
-             | [7] Vault-Wrt | ---> Markdown files with [[wikilinks]] -> ./vault
+             | [7] Vault-Wrt | ---> Markdown files with [[wikilinks]] -> ./vault/{platform}/
              +---------------+
 ```
 
@@ -227,7 +241,7 @@ know-ctl/
 │   ├── agents/          # Pipeline agents (Ingest, Classify, Embed, VaultWrite, etc.)
 │   ├── cli/             # Typer CLI subcommands (pipeline, server, schedule, graph)
 │   ├── config/          # Pydantic Settings and configuration loader
-│   ├── connectors/      # Playwright browser automation and LinkedIn scraper
+│   ├── connectors/      # Playwright browser automation and platform connectors
 │   ├── knowledge/       # Obsidian formatting, graph layout, semantic search
 │   ├── llm/             # Hybrid client, Groq client, prompt templates, factory
 │   ├── storage/         # SQLAlchemy models, SQLite migrations, encrypted config store

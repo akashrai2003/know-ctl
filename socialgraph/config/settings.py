@@ -87,9 +87,6 @@ class Settings(BaseSettings):
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
         (self.workspace_dir / "logs").mkdir(exist_ok=True)
         self.obsidian_vault_path.mkdir(parents=True, exist_ok=True)
-        (self.obsidian_vault_path / "posts").mkdir(exist_ok=True)
-        (self.obsidian_vault_path / "topics").mkdir(exist_ok=True)
-        (self.obsidian_vault_path / "authors").mkdir(exist_ok=True)
 
     @classmethod
     async def from_db(cls, db_path: Path | None = None) -> Settings:

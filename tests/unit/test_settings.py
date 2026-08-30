@@ -60,6 +60,3 @@ def test_ensure_workspace(tmp_path: Path) -> None:
     assert workspace_dir.exists()
     assert (workspace_dir / "logs").exists()
     assert vault_dir.exists()
-    assert (vault_dir / "posts").exists()
-    assert (vault_dir / "topics").exists()
-    assert (vault_dir / "authors").exists()
