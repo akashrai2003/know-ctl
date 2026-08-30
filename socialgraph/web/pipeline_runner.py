@@ -221,9 +221,7 @@ class PipelineRunner:
             # Send a sentinel so SSE clients know the stream ended
             self._push_log({"ts": datetime.now(timezone.utc).isoformat(), "event": "__done__"})
 
-    async def stream_logs(
-        self, from_index: int = 0
-    ) -> AsyncIterator[str]:
+    async def stream_logs(self, from_index: int = 0) -> AsyncIterator[str]:
         """Yield SSE-formatted log events.
 
         Yields buffered logs first (from *from_index*), then live events until

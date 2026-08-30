@@ -261,7 +261,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 except Exception:
                     pass
 
-            mode = "batch + async" if has_batch else "async-only (no /batch endpoint, will use concurrent calls)"
+            mode = (
+                "batch + async"
+                if has_batch
+                else "async-only (no /batch endpoint, will use concurrent calls)"
+            )
             return ConnectionTestResult(
                 ok=True,
                 message=f"Connected ✓ — mode: {mode}",

@@ -195,4 +195,3 @@ class PipelineStatusOut(BaseModel):
     completed_at: str | None = None
     last_result: dict | None = None
     log_count: int = 0
-

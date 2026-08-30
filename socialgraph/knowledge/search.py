@@ -199,7 +199,6 @@ def build_similarity_map(
         return res
 
 
-
 async def load_embeddings(session) -> list[tuple[int, list[float]]]:  # type: ignore[type-arg]
     """Load all post embeddings from DB as (post_id, vector) tuples."""
     from socialgraph.storage.models import Embedding

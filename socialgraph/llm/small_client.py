@@ -306,4 +306,3 @@ class HybridLLMClient:
         """Single completion request."""
         results = await self.batch_chat([messages], response_format, temperature)
         return results[0] if results else None
-

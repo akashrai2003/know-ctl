@@ -1,230 +1,253 @@
-# Social Graph
+<div align="center">
 
-[![CI](https://github.com/akashrai2003/social-graph/actions/workflows/ci.yml/badge.svg)](https://github.com/akashrai2003/social-graph/actions/workflows/ci.yml)
+# ⬡ Social Graph (`know-ctl`)
+
+### Transform LinkedIn saved posts into an interactive, interconnected Obsidian knowledge graph.
+
+[![CI](https://github.com/akashrai2003/know-ctl/actions/workflows/ci.yml/badge.svg)](https://github.com/akashrai2003/know-ctl/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.111+-009688.svg?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Obsidian](https://img.shields.io/badge/Obsidian-Vault%20Ready-7C3AED.svg?logo=obsidian&logoColor=white)](https://obsidian.md)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-Transform LinkedIn saved posts into a navigable Obsidian knowledge graph.
+[**Key Features**](#-key-features) • [**Quick Start (Web UI)**](#-quick-start-recommended--web-ui) • [**Architecture**](#-architecture) • [**CLI Reference**](#-cli-reference) • [**Setup Guide**](SETUP.md)
 
-Social Graph automates fetching saved posts, downloading linked external articles, extracting comments, generating embeddings, identifying topics, detecting communities, and building a local Markdown-based personal knowledge graph complete with link-backs and monthly timeline files. It also includes a local FastAPI/Uvicorn **web dashboard** with a built-in setup wizard so you can configure everything from the browser — no `.env` file needed.
+</div>
 
-## Key Features
+---
 
-1. **Ingest** — Import saved posts from exported JSON files or scrape live via Playwright.
-2. **Comment Scraping** — Retrieve thread comments directly using the Voyager API.
-3. **URL Enrichment** — Automatically crawl external web page links referenced in posts and comments.
-4. **LLM Routing** — Hybrid mode: light classification via any OpenAI-compatible local server (vLLM, llama.cpp, Ollama), complex synthesis via Groq. Auto-detects `/batch` endpoint support.
-5. **Local Embeddings** — Generate vector embeddings locally for semantic similarity matching.
-6. **Obsidian Vault Writer** — Render clean notes in Obsidian with YAML frontmatter, backlinks, and topic MOCs.
-7. **Web Dashboard** — Configure keys, upload data, run pipelines, and visualize your graph — all from the browser.
-8. **MCP Server** — Query your social graph directly from LLM-powered tools (like Claude Desktop).
+## 📖 Overview
+
+**Social Graph** bridges social content consumption and personal knowledge management (PKM). It ingests your saved LinkedIn posts, crawls and extracts external web links, scrapes high-signal comments, generates local vector embeddings, maps topics using hybrid LLM routing (local models + Groq), detects communities via the Leiden algorithm, and outputs a pristine, linked **Obsidian Markdown Vault**.
+
+It features a **standalone web application** with an onboarding wizard, interactive settings dashboard, encrypted credential store, live pipeline runner terminal, and a D3 force-directed knowledge graph — **no `.env` file or manual configuration required**.
+
+---
+
+## ✨ Key Features
+
+- **🌐 Zero-Config Web Dashboard**: Complete web UI powered by FastAPI with dark-mode glassmorphism. Setup keys, upload files, inspect topics, authors, and graph clusters directly in browser.
+- **🔐 Encrypted Local Storage**: Machine-derived Fernet AES encryption stores credentials securely in local SQLite (`.socialgraph/socialgraph.db`).
+- **⚡ Hybrid LLM Pipeline**:
+  - **Local Models** (vLLM, llama.cpp, Ollama, LM Studio): High-throughput classification and batch subtopic detection. Auto-detects `/v1/chat/completions/batch` and falls back to concurrent async requests seamlessly.
+  - **Groq API**: High-speed reasoning with Qwen / Llama models for community clustering and graph synthesis.
+- **📥 Dual Ingestion Modes**: Upload LinkedIn's official data archive JSON export, or live-scrape posts and comments using Playwright (email/password or `li_at` session cookie).
+- **🔗 Deep URL & Comment Enrichment**: Crawls linked web pages with `trafilatura` and extracts thread discussions to retain complete context.
+- **🔢 Local Vector Embeddings & Fast Cosine Search**: Generates embeddings locally using `sentence-transformers` with vectorized matrix similarity calculations.
+- **📝 Obsidian Vault Synthesis**: Writes clean Markdown files with YAML frontmatter, bidirectional `[[wikilinks]]`, topic MOCs (Maps of Content), and author profiles.
+- **🔌 Model Context Protocol (MCP)**: Query your social knowledge base directly from Claude Desktop or custom AI agents.
 
 ---
 
 ## ⚡ Quick Start (Recommended — Web UI)
 
-No `.env` required. Configure everything from the browser.
+No `.env` file required. You can configure and run everything from the browser.
 
-### 1. Install
+### 1. Clone & Install
 
 ```bash
-git clone https://github.com/akashrai2003/social-graph.git
-cd social-graph
+# Clone the repository
+git clone https://github.com/akashrai2003/know-ctl.git
+cd know-ctl
 
-# Install dependencies (Python 3.10+)
+# Create virtual environment (Python >= 3.10)
+python3 -m venv venv
+source venv/bin/activate
+
+# Install dependencies
 pip install -e .
 
-# Or with dev tools
+# Or install with development & test tools
 pip install -e ".[dev]"
 ```
 
 ### 2. Initialize & Launch
 
 ```bash
-# Create workspace directories and database
+# Initialize local database tables and workspace folders
 sg init
 
-# Start the web dashboard
+# Launch the Web Dashboard
 sg web
 ```
 
-Open **http://localhost:8080** in your browser.
+Open **`http://localhost:8080`** in your browser.
 
-### 3. Setup Wizard
+### 3. Onboarding Wizard
 
-The app will guide you through a 5-step onboarding wizard on first launch:
+On first launch, an interactive 5-step wizard guides you:
+1. **Welcome**: Quick tour of features.
+2. **Groq API Key**: Enter your free API key from [console.groq.com](https://console.groq.com) with an instant inline connectivity test.
+3. **Local Model Server** *(optional)*: Connect vLLM, llama.cpp, or Ollama (supports auto-batch detection).
+4. **LinkedIn Credentials** *(optional)*: Email/password or session cookie (`li_at`) for live scraping.
+5. **Ready**: Upload your archive or trigger the pipeline.
 
-1. **Welcome** — Overview of what Social Graph does
-2. **Groq API Key** — Get a free key at [console.groq.com](https://console.groq.com) (takes 30 seconds)
-3. **Local Model** *(optional)* — Connect vLLM, llama.cpp, Ollama, or any OpenAI-compatible server
-4. **LinkedIn** *(optional)* — Email/password or session cookie for live scraping
-5. **Done** — Upload your LinkedIn data or click "Run Pipeline"
+### 4. Upload LinkedIn Export Data
 
-### 4. Upload LinkedIn Data
+In the **Settings** tab, drag & drop your `linkedin_saved_posts.json` archive:
+> LinkedIn → **Settings & Privacy** → **Data Privacy** → **Get a copy of your data** → select **Saved items**.
 
-In the **Settings** page, upload your `linkedin_saved_posts.json` export:
+### 5. Run the Pipeline
 
-> LinkedIn → Me → Settings & Privacy → Data Privacy → Get a copy of your data → select "Saved items"
-
-### 5. Run
-
-Click **⚡ Run Pipeline** in the Pipeline page and watch the real-time log stream.
+Head to the **⚡ Pipeline** page and click **Run Pipeline**. Follow real-time execution in the embedded terminal stream.
 
 ---
 
-## Alternative: CLI Setup (`.env` file)
+## 🖥️ Alternative: CLI Setup (`.env`)
 
-If you prefer the traditional approach, copy `.env.example` and fill in your keys:
+For headless servers or automation scripts, you can supply credentials via environment variables or a `.env` file:
 
 ```bash
 cp .env.example .env
-# Edit .env with your credentials
+# Edit .env with your Groq API key and optional endpoints
 sg init
 sg run
 ```
 
-> **Note:** Settings configured via the web UI take precedence over `.env` values.
+> **Note**: Values configured via the Web UI are stored in SQLite and take precedence over `.env` defaults.
 
 ---
 
-## Architecture
+## 🏗️ Architecture
 
+```text
+ linkedin_saved_posts.json (or Playwright Live Scraping)
+                     │
+                     ▼
+             ┌───────────────┐
+             │ [1]  Ingest   │ ──► SQLite (.socialgraph/socialgraph.db)
+             └───────┬───────┘
+                     ▼
+             ┌───────────────┐
+             │ [2] Comments  │ ──► Voyager API / DOM thread extraction
+             └───────┬───────┘
+                     ▼
+             ┌───────────────┐
+             │ [3]  Enrich   │ ──► trafilatura + httpx (external article text)
+             └───────┬───────┘
+                     ▼
+             ┌───────────────┐
+             │ [4] Classify  │ ──► Hybrid LLM (vLLM / llama.cpp batch)
+             └───────┬───────┘
+                     ▼
+             ┌───────────────┐
+             │ [5]   Embed   │ ──► Local SentenceTransformers (Qwen-0.6B)
+             └───────┬───────┘
+                     ▼
+             ┌───────────────┐
+             │ [6] Graph-Bld │ ──► Groq (Llama-3.3-70b / Qwen) → graphifyy Leiden
+             └───────┬───────┘
+                     ▼
+             ┌───────────────┐
+             │ [7] Vault-Wrt │ ──► Markdown files with [[wikilinks]] → ./vault
+             └───────────────┘
 ```
-linkedin_saved_posts.json
-         │
-         ▼
-     [ingest]  ──── SQLite (.socialgraph/socialgraph.db)
-         │
-         ▼
-     [enrich]  ──── trafilatura + httpx → ExternalLink rows
-         │
-         ▼
-   [classify]  ──── Local model (vLLM/llama.cpp/Ollama) batch → PostTopic rows
-         │                    ↕ auto-fallback to concurrent calls if no /batch
-         ▼
- [graph_build] ──── Groq (Llama-3.3-70b) → graphifyy Leiden
-         │
-         ▼
- [vault_write] ──── Obsidian .md files → vault/
-```
 
-### LLM & Embedding Setup
+### LLM Task Matrix
 
-| Component | Purpose | Required |
-|-----------|---------|----------|
-| **Groq API** | Heavy reasoning: graph building, enrichment, synthesis | ✅ Yes |
-| **Local Model** | Batch classification, subtopics | ⭕ Optional |
-| **Local Embeddings** | Semantic search (runs on CPU/GPU) | Auto |
-
-**Local model servers supported:** vLLM, llama.cpp, Ollama, LM Studio, or any OpenAI-compatible server. The hybrid client auto-detects whether `/v1/chat/completions/batch` is available and falls back to concurrent individual calls if not.
+| Component | Responsibility | Recommended Model | Mode |
+|:---|:---|:---|:---:|
+| **Groq API** | Community detection, graph synthesis, reasoning | `llama-3.3-70b-versatile` / `qwen/qwen3.6-27b` | Cloud API |
+| **Local Model** | Fast post topic classification & subtopic mapping | `Qwen/Qwen3.5-9B-FP8` | Batch / Async |
+| **Local Embeddings** | Vector similarity & cosine graph edges | `Qwen/Qwen3-Embedding-0.6B` | Local (CUDA/CPU) |
 
 ---
 
-## CLI Commands Reference
+## 💻 CLI Reference
+
+Social Graph provides the `sg` command-line interface for granular control:
 
 ```bash
-# Workspace & Pipeline Status
-sg init                          # Initialize workspace and DB tables
-sg status                        # Show current status of posts and scheduler
+# ── Core & Status ──────────────────────────────────────────────
+sg init                          # Initialize database schema and workspace
+sg status                        # Display post counts by stage and daemon status
 
-# Running the pipeline
+# ── Pipeline Execution ─────────────────────────────────────────
 sg run                           # Run full pipeline end-to-end
-sg run --from classify           # Resume pipeline starting from the classify stage
-sg run --stage enrich            # Run ONLY the enrich stage
+sg run --from classify           # Resume starting from a specific stage
+sg run --stage enrich            # Execute only one specific stage
+sg run --live                    # Use live Playwright scraper instead of JSON
 
-# Granular Pipeline Stages
-sg ingest --json <file>          # Ingest posts from a JSON export
-sg scrape                        # Open browser (Playwright) to pull saved posts live
-sg comments                      # Scrape LinkedIn comments for ingested posts
-sg enrich                        # Enrich pending posts (fetch URLs)
-sg comment-enrich                # Fetch and summarize links in comments
-sg classify                      # Classify posts into topics
-sg embed                         # Generate vector embeddings
-sg subtopic                      # Detect subtopics within categories
-sg semantic-edges                # Build edges between posts by cosine similarity
-sg build-graph                   # Build the knowledge graph nodes/edges
-sg vault-write                   # Write notes to the Obsidian vault directory
+# ── Individual Stages ──────────────────────────────────────────
+sg ingest --json <file>          # Ingest posts from a JSON archive
+sg scrape                        # Launch browser to scrape saved posts live
+sg comments                      # Fetch post comments and discussion threads
+sg enrich                        # Crawl and summarize linked URLs
+sg comment-enrich                # Fetch and summarize links inside comments
+sg classify                      # Categorize posts according to topic taxonomy
+sg embed                         # Compute vector embeddings for all posts
+sg subtopic                      # Detect granular subtopics per category
+sg semantic-edges                # Build cosine similarity graph edges
+sg build-graph                   # Cluster communities using Leiden algorithm
+sg vault-write                   # Generate Markdown files in Obsidian vault
 
-# Semantic Search
+# ── Discovery & Analytics ──────────────────────────────────────
 sg search "vector databases"     # Semantic search over your posts
-sg similar "urn:li:activity:..." # Find semantically similar posts
+sg similar "urn:li:activity:..." # Find semantically related posts
+sg graph stats                   # Inspect topic and author distributions
+sg graph co-occurrence           # Analyze topic co-occurrence patterns
+sg graph timeline                # Monthly post activity breakdown
 
-# Graph Analytics
-sg graph stats                   # View topic and author distributions
-sg graph co-occurrence           # Show top topic co-occurrences
-sg graph timeline                # Show monthly post counts filtered by author/topic
-
-# Scheduler (Background Daemon)
-sg schedule start                # Start background daemon (pipeline runs every 6h)
+# ── Background Daemon & Web Server ─────────────────────────────
+sg schedule start                # Start background scheduler (syncs every 6h)
+sg schedule status               # Check background daemon health
 sg schedule stop                 # Stop background scheduler
-sg schedule status               # Show status of background daemon
-
-# Web UI & Integrations
-sg web                           # Start local dashboard (http://localhost:8080)
-sg web --no-open                 # Start without auto-opening browser
-sg mcp-serve                     # Start Model Context Protocol server (stdio or sse)
+sg web                           # Launch web dashboard (http://localhost:8080)
+sg web --no-open --port 3000     # Run web dashboard on custom port headlessly
+sg mcp-serve                     # Start Model Context Protocol server (stdio/http)
 ```
 
 ---
 
-## Configuration
+## ⚙️ Configuration Reference
 
-### Web UI (Recommended)
+Settings can be managed dynamically in **Web UI → Settings** or set in `.env`:
 
-Open `http://localhost:8080/settings` to configure everything from the browser. All settings are encrypted and stored locally in the SQLite database — no `.env` needed.
-
-### `.env` File (Advanced / Fallback)
-
-```ini
-# Required — Groq API for taxonomy synthesis & large model tasks
-SG_GROQ_API_KEY=gsk_...
-SG_GROQ_MODEL=llama-3.3-70b-versatile
-
-# Optional — Local model server (any OpenAI-compatible)
-SG_VLLM_BASE_URL=http://localhost:8000   # or ngrok URL
-SG_VLLM_MODEL=Qwen/Qwen3.5-9B-FP8
-
-# LinkedIn credentials (only for live scraping / comment fetching)
-SG_LINKEDIN_EMAIL=user@example.com
-SG_LINKEDIN_PASSWORD=your_password
-# OR use session cookie:
-SG_LINKEDIN_COOKIE=your_li_at_cookie_value
-
-# Optional overrides (defaults shown)
-# SG_DB_PATH=.socialgraph/socialgraph.db
-# SG_WORKSPACE_DIR=.socialgraph
-# SG_OBSIDIAN_VAULT_PATH=./vault
-# SG_BATCH_SIZE=10
-# SG_LLM_TIMEOUT=580.0
-# SG_MAX_COMMENTS=5
-# SG_LOG_LEVEL=INFO
-# SG_WEB_PORT=8080
-# SG_SCHEDULE_INTERVAL_HOURS=6.0
-```
-
-> **Note:** Web UI settings take precedence over `.env` values.
+| Setting | Env Variable | Default | Description |
+|:---|:---|:---:|:---|
+| **Groq API Key** | `SG_GROQ_API_KEY` | `""` | Required for graph reasoning & synthesis |
+| **Groq Model** | `SG_GROQ_MODEL` | `llama-3.3-70b-versatile` | Primary reasoning model |
+| **Local Model URL** | `SG_VLLM_BASE_URL` | `""` | Local OpenAI-compatible server URL |
+| **Local Model ID** | `SG_VLLM_MODEL` | `Qwen/Qwen3.5-9B-FP8` | Model ID for classification |
+| **Embedding Model** | `SG_EMBEDDING_MODEL` | `Qwen/Qwen3-Embedding-0.6B` | Sentence-transformers model |
+| **Embedding Device** | `SG_EMBEDDING_DEVICE` | `cuda` | `cuda`, `cpu`, or `mps` |
+| **LinkedIn Email** | `SG_LINKEDIN_EMAIL` | `""` | Account email for live scraping |
+| **LinkedIn Password** | `SG_LINKEDIN_PASSWORD` | `""` | Account password for live scraping |
+| **LinkedIn Cookie** | `SG_LINKEDIN_COOKIE` | `""` | `li_at` session cookie for MFA bypass |
+| **Batch Size** | `SG_BATCH_SIZE` | `10` | Concurrency batch size for LLM calls |
+| **Max Comments** | `SG_MAX_COMMENTS` | `5` | Comments per post to scrape |
+| **Obsidian Vault** | `SG_OBSIDIAN_VAULT_PATH` | `./vault` | Output directory for Markdown notes |
+| **Web Port** | `SG_WEB_PORT` | `8080` | Local dashboard server port |
 
 ---
 
-## Project Structure
+## 📁 Repository Structure
 
-```
-socialgraph/            # Main Python source package
-  ├── agents/           # Pipeline stage agents (Ingest, Classify, Enrich, etc.)
-  ├── cli/              # Modular typer CLI commands
-  ├── config/           # Application configuration models
-  ├── connectors/       # API and browser scrape integrations
-  ├── knowledge/        # Obsidian rendering, search, and graph algorithms
-  ├── llm/              # OpenAI/Groq router & hybrid client classes
-  ├── storage/          # SQLAlchemy schemas, migrations, repository layer
-  └── web/              # FastAPI application, pipeline runner & web assets
-tests/                  # Complete test suite (unit, integration, e2e)
-vault/                  # Default Obsidian vault output directory (git-ignored)
-.socialgraph/           # Default SQLite DB and application cache (git-ignored)
+```text
+know-ctl/
+├── socialgraph/
+│   ├── agents/          # Pipeline agents (Ingest, Classify, Embed, VaultWrite, etc.)
+│   ├── cli/             # Typer CLI subcommands (pipeline, server, schedule, graph)
+│   ├── config/          # Pydantic Settings and configuration loader
+│   ├── connectors/      # Playwright browser automation & LinkedIn scraper
+│   ├── knowledge/       # Obsidian formatting, graph layout, semantic search
+│   ├── llm/             # Hybrid client, Groq client, prompt templates, factory
+│   ├── storage/         # SQLAlchemy models, SQLite migrations, encrypted config store
+│   └── web/             # FastAPI app, SSE pipeline runner, static assets (HTML/CSS/JS)
+├── tests/               # Pytest suite (unit, API, integration)
+├── vault/               # Generated Obsidian knowledge vault (git-ignored)
+├── .socialgraph/        # Application database and logs (git-ignored)
+├── SETUP.md             # In-depth credential & cookie setup guide
+└── pyproject.toml       # Project metadata, dependencies, and tools
 ```
 
 ---
 
-## Contributing
+## 🤝 Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines. Open-source under the [MIT License](LICENSE).
+Contributions are welcome! Please check out [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on code formatting (`ruff format`), linting (`ruff check`), and running the test suite (`pytest`).
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
