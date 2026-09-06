@@ -1,4 +1,4 @@
-"""MCP server exposing Social Graph knowledge as 8 tools.
+"""MCP server exposing Social Graph knowledge as 9 tools.
 
 Supports two transports:
 - stdio  (for Claude Desktop / local MCP clients)
@@ -71,6 +71,20 @@ TOOLS = [
             "properties": {
                 "urn": {"type": "string", "description": "Post URN (urn:li:activity:...)"},
                 "limit": {"type": "integer", "default": 5},
+            },
+            "required": ["urn"],
+        },
+    ),
+    Tool(
+        name="get_briefing",
+        description=(
+            "Get the evidence-backed AI briefing for a post, including article takeaways, "
+            "community claims, resources, open questions, and source coverage."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "urn": {"type": "string", "description": "Post URN (urn:li:activity:...)"},
             },
             "required": ["urn"],
         },
@@ -154,6 +168,8 @@ async def _dispatch(name: str, args: dict[str, Any], settings) -> Any:
             return await _get_author_profile(session, **args)
         elif name == "find_similar":
             return await _find_similar(session, settings, **args)
+        elif name == "get_briefing":
+            return await _get_briefing(session, **args)
         elif name == "traverse_graph":
             return await _traverse_graph(session, **args)
         elif name == "get_weekly_digest":
@@ -329,6 +345,54 @@ async def _find_similar(session, _settings, urn: str, limit: int = 5) -> list[di
         for pid in post_ids
         if pid in posts
     ]
+
+
+async def _get_briefing(session, urn: str) -> dict:
+    from dataclasses import asdict
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    from socialgraph.knowledge.comment_rank import useful_comments
+    from socialgraph.knowledge.insights import parse_insight
+    from socialgraph.storage.models import Post, PostExternalLink, PostTopic
+
+    post = await session.scalar(
+        select(Post)
+        .where(Post.urn == urn)
+        .options(
+            selectinload(Post.post_topics).selectinload(PostTopic.topic),
+            selectinload(Post.comments),
+            selectinload(Post.post_links).selectinload(PostExternalLink.external_link),
+        )
+    )
+    if not post:
+        return {"error": f"Post URN {urn} not found"}
+
+    insight = parse_insight(post.insight_json)
+    if insight is None:
+        return {
+            "error": "No briefing for this post. Run `sg brief <urn>` or the insights stage.",
+            "urn": urn,
+        }
+
+    comments = useful_comments(post.comments, limit=15)
+    return {
+        "urn": post.urn,
+        "title": post.title,
+        "author": post.author,
+        "topics": [pt.topic.name for pt in post.post_topics],
+        "briefing": asdict(insight),
+        "generated_at": (
+            post.insight_generated_at.isoformat() if post.insight_generated_at else None
+        ),
+        "source_coverage": {
+            "articles": sum(1 for pel in post.post_links if pel.context == "body"),
+            "useful_comments": len(comments),
+            "comment_resources": sum(1 for pel in post.post_links if pel.context == "comment"),
+        },
+        "source_url": post.source_url,
+    }
 
 
 async def _traverse_graph(session, topic: str, depth: int = 2) -> dict:

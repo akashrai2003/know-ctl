@@ -5,7 +5,7 @@ from __future__ import annotations
 from socialgraph.config.settings import Settings
 from socialgraph.llm.large_client import GroqClient
 from socialgraph.llm.router import LLMRouter
-from socialgraph.llm.small_client import BatchLLMClient, HybridLLMClient
+from socialgraph.llm.small_client import BatchLLMClient, GroqBatchClient, HybridLLMClient
 
 
 def build_router(settings: Settings) -> LLMRouter:
@@ -25,9 +25,18 @@ def build_router(settings: Settings) -> LLMRouter:
     Returns:
         A fully initialised LLM router.
     """
+    groq = None
+    if settings.groq_api_key:
+        groq = GroqClient(
+            api_key=settings.groq_api_key,
+            model=settings.groq_model,
+            base_url=settings.groq_base_url,
+            fallback_models=settings.groq_fallback_models,
+        )
+
     # Prefer HybridLLMClient when a base URL is available (covers llama.cpp etc.)
     if settings.vllm_base_url:
-        batch: BatchLLMClient | HybridLLMClient = HybridLLMClient(
+        batch: BatchLLMClient | HybridLLMClient | GroqBatchClient = HybridLLMClient(
             base_url=settings.vllm_base_url,
             model=settings.vllm_model,
             api_key=settings.vllm_api_key or "sk-placeholder",
@@ -41,21 +50,16 @@ def build_router(settings: Settings) -> LLMRouter:
             model=settings.vllm_model,
             timeout=settings.llm_timeout,
         )
+    elif groq is not None:
+        # A local model is optional in the web onboarding flow. Preserve the
+        # batch interface while falling back to bounded Groq requests.
+        batch = GroqBatchClient(groq, concurrency=min(settings.batch_size, 3))
     else:
-        # No local model — use a dummy BatchLLMClient pointing nowhere
-        # (Groq will handle all tasks via LLMRouter fallback)
+        # No model provider is configured. Calls fail with a normal connection
+        # error, while dry-runs and non-LLM commands continue to work.
         batch = BatchLLMClient(
             batch_url="http://localhost:8000/v1/chat/completions/batch",
             model=settings.vllm_model,
             timeout=settings.llm_timeout,
-        )
-
-    groq = None
-    if settings.groq_api_key:
-        groq = GroqClient(
-            api_key=settings.groq_api_key,
-            model=settings.groq_model,
-            base_url=settings.groq_base_url,
-            fallback_models=settings.groq_fallback_models,
         )
     return LLMRouter(batch, groq)

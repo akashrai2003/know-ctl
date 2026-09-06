@@ -56,6 +56,9 @@ class Post(Base):
 
     title: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[str | None] = mapped_column(Text)
+    insight_json: Mapped[str | None] = mapped_column(Text)
+    insight_source_hash: Mapped[str | None] = mapped_column(String(64))
+    insight_generated_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     post_topics: Mapped[list[PostTopic]] = relationship("PostTopic", back_populates="post")
     post_subtopics: Mapped[list[PostSubtopic]] = relationship("PostSubtopic", back_populates="post")
@@ -193,6 +196,8 @@ class Comment(Base):
     is_reply: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     comment_urn: Mapped[str | None] = mapped_column(String(512), nullable=True)
     parent_comment_urn: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    usefulness_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utc_now)
 
     post: Mapped[Post] = relationship("Post", back_populates="comments")

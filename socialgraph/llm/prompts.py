@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 CLASSIFY_POST_TOPICS_SYSTEM = """\
-You are a topic classifier for professional social media posts.
-Given a post's content and a list of canonical topic names, assign the most relevant topics.
+You are a topic classifier for a professional AI/tech knowledge base.
+You receive the post, any linked article, and notable discussion comments.
+Assign topics using the full context, not just the post's first paragraph.
 Respond with valid JSON only. No explanation."""
 
 CLASSIFY_POST_TOPICS_USER = """\
 Available topics (use ONLY these exact names in your response):
 {topics}
 
-Post content:
+Context:
 {content}
 
 Respond with JSON:
@@ -23,7 +24,8 @@ Respond with JSON:
 Rules:
 - Assign 1-3 topics max
 - Use ONLY the exact topic names from the list above (do not include descriptions)
-- confidence: 0.0–1.0 reflecting how clearly the post fits the chosen topics
+- Weigh the linked article and technical comments as much as the post text
+- confidence: 0.0–1.0 reflecting how clearly the material fits the chosen topics
 - If nothing fits, return {{"topics": [], "confidence": 0.1}}
 """
 
@@ -101,12 +103,37 @@ Article content:
 Write a 2–3 sentence summary of what makes this resource valuable, informed by why the commenter shared it.
 """
 
+RANK_COMMENT_SYSTEM = """\
+You classify LinkedIn comments for a technical knowledge base.
+Judge whether the comment adds information beyond the original post. Applause, repetition,
+generic agreement, and product pitches are noise. Concrete experience, facts, tradeoffs,
+technical questions, and useful documentation/code links are valuable.
+Respond with valid JSON only."""
+
+RANK_COMMENT_USER = """\
+ORIGINAL POST:
+{post}
+
+COMMENT:
+{comment}
+
+Return JSON:
+{{
+  "kind": "insight|question|resource|noise",
+  "usefulness_score": 0.0
+}}
+
+The score is 0.0-1.0. Use resource only for a genuinely useful paper, documentation,
+repository, benchmark, or technical article. Marketing links are noise.
+"""
+
 GENERATE_POST_TITLE_SUBTOPIC_SYSTEM = """\
 You are a knowledge organizer for a professional AI/tech knowledge base.
-For each post you receive, generate:
-1. A two-line title capturing the post's subject and key insight.
+You receive the post plus any linked article and notable comments.
+For each item generate:
+1. A two-line title capturing the subject and the key insight (including article/thread if richer).
 2. A subtopic name (2-4 words, title-case) that groups this post within its parent topic.
-3. A 3-5 sentence summary that distills the post's core message — clean, no emojis, no hashtags.
+3. A 3-5 sentence summary of the idea — not a paraphrase of the first paragraph only.
 
 Respond with valid JSON only. No explanation."""
 
@@ -116,7 +143,7 @@ Parent topic: {topic_name}
 Existing subtopics (prefer these if a good match exists):
 {existing_subtopics}
 
-Post content:
+Context:
 {content}
 
 Return JSON:
@@ -165,4 +192,60 @@ Return JSON:
 
 Return an empty list if no merges are needed: {{"merges": []}}
 Only suggest merges you are confident about. When in doubt, keep them separate.
+"""
+
+SYNTHESIZE_INSIGHTS_SYSTEM = """\
+You are a senior AI engineer writing a knowledge briefing from a LinkedIn post.
+The post is only the entry point. Your job is to understand the idea using:
+- the post
+- the linked article (if present)
+- high-signal comments (claims, numbers, tools, questions — ignore applause and product pitches)
+
+Write as if the reader will never open LinkedIn. Extract knowledge, not a recap.
+Respond with valid JSON only."""
+
+SYNTHESIZE_INSIGHTS_USER = """\
+Author: {author}
+Title: {title}
+
+POST:
+{post}
+
+LINKED ARTICLES:
+{articles}
+
+USEFUL COMMENTS (already filtered; treat these as primary sources):
+{comments}
+
+COMMENT-SHARED RESOURCES:
+{comment_links}
+
+Return JSON:
+{{
+  "thesis": "2-4 sentences. The actual idea, combining post + article + comments. Include specific numbers, tools, and thresholds. Do not paraphrase the post if the article or comments add more.",
+  "article_takeaways": ["concrete claims, techniques, or numbers from the linked article only"],
+  "community_insights": [
+    {{
+      "author": "commenter name",
+      "claim": "the new information they added",
+      "why_it_matters": "one sentence on why a practitioner should care"
+    }}
+  ],
+  "resources": [
+    {{
+      "title": "resource title",
+      "url": "https://...",
+      "value": "why this link is worth opening"
+    }}
+  ],
+  "open_questions": ["unresolved technical questions from the thread"]
+}}
+
+Rules:
+- Prefer specific facts (50M tokens/day, 70B on 24GB, INT8 KV cache) over vague praise.
+- Drop marketing, CTAs, and "great share" even if they slipped in.
+- article_takeaways must come from the article text, not the post, and may be [].
+- community_insights must add something the post did not already say, and may be [].
+- resources should include the main article and any GitHub/docs/papers from comments.
+- Never invent URLs or numbers that are not in the sources.
 """

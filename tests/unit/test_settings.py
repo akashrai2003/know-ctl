@@ -27,7 +27,8 @@ def test_settings_env_prefix() -> None:
 
 
 def test_vllm_batch_url_validator() -> None:
-    # default base URL is empty, so batch URL will just be /v1/chat/completions/batch
+    assert Settings(_env_file=None).vllm_batch_url == ""
+
     settings = Settings(vllm_base_url="https://api.example.com", _env_file=None)
     assert settings.vllm_batch_url == "https://api.example.com/v1/chat/completions/batch"
 

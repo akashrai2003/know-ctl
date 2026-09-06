@@ -199,6 +199,25 @@ async function renderHome() {
         <div class="stat-value">${stats.total_comments.toLocaleString()}</div>
         <div class="stat-label">Comments</div>
       </div>
+      <div class="card stat-card">
+        <div class="stat-value">${(stats.total_briefings || 0).toLocaleString()}</div>
+        <div class="stat-label">AI Briefings</div>
+      </div>
+      <div class="card stat-card">
+        <div class="stat-value">${(stats.total_useful_comments || 0).toLocaleString()}</div>
+        <div class="stat-label">Useful Claims</div>
+      </div>
+    </div>
+  `;
+
+  const intelligenceHtml = `
+    <div class="intelligence-banner">
+      <div>
+        <div class="intelligence-kicker">Community intelligence</div>
+        <div class="intelligence-value">${(stats.useful_comments_last_7_days || 0).toLocaleString()} high-signal comments added this week</div>
+        <div class="intelligence-copy">${Math.round((stats.briefing_coverage || 0) * 100)}% of saved posts now have an evidence-backed AI briefing.</div>
+      </div>
+      <a href="#/pipeline" class="btn btn-ghost">Run understanding pipeline →</a>
     </div>
   `;
 
@@ -242,6 +261,7 @@ async function renderHome() {
       <p class="page-description">Your LinkedIn knowledge graph — ${stats.total_posts.toLocaleString()} posts across ${stats.total_topics} topics from ${stats.total_authors} authors.</p>
     </div>
     ${statsHtml}
+    ${intelligenceHtml}
     ${lastRunHtml}
     <div class="section-header" style="margin-top:var(--space-2xl)">
       <h2 class="section-title">Topics</h2>
@@ -345,6 +365,41 @@ async function renderTopicDetail(topicSlug) {
 }
 
 /* ── POST DETAIL ──────────────────────────────────────────────────────────── */
+function renderBriefing(insight) {
+  if (!insight) return '';
+
+  const takeaways = (insight.article_takeaways || []).map(item =>
+    `<li>${escapeHtml(item)}</li>`
+  ).join('');
+  const community = (insight.community_insights || []).map(item => `
+    <div class="insight-claim">
+      <div class="insight-claim-author">${escapeHtml(item.author || 'Community')}</div>
+      <div class="insight-claim-text">${escapeHtml(item.claim || '')}</div>
+      ${item.why_it_matters ? `<div class="insight-why">Why it matters: ${escapeHtml(item.why_it_matters)}</div>` : ''}
+    </div>
+  `).join('');
+  const resources = (insight.resources || []).map(item => `
+    <div class="link-card">
+      ${item.url ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer" class="link-title">${escapeHtml(item.title || item.url)}</a>` : `<div class="link-title">${escapeHtml(item.title || 'Resource')}</div>`}
+      ${item.value ? `<div class="link-summary">${escapeHtml(item.value)}</div>` : ''}
+    </div>
+  `).join('');
+  const questions = (insight.open_questions || []).map(item =>
+    `<li>${escapeHtml(item)}</li>`
+  ).join('');
+
+  return `
+    <section class="briefing-card">
+      <div class="briefing-label">AI briefing</div>
+      ${insight.thesis ? `<div class="briefing-thesis">${escapeHtml(insight.thesis)}</div>` : ''}
+      ${takeaways ? `<div class="briefing-section"><h3>From the article</h3><ul>${takeaways}</ul></div>` : ''}
+      ${community ? `<div class="briefing-section"><h3>Community insights</h3>${community}</div>` : ''}
+      ${resources ? `<div class="briefing-section"><h3>Resources</h3>${resources}</div>` : ''}
+      ${questions ? `<div class="briefing-section"><h3>Open questions</h3><ul>${questions}</ul></div>` : ''}
+    </section>
+  `;
+}
+
 async function renderPostDetail(urn) {
   const data = await api(`/posts/${urn}`);
   if (data.error) {
@@ -365,7 +420,10 @@ async function renderPostDetail(urn) {
 
   const commentsHtml = (data.comments || []).map(c => `
     <div class="comment-card">
-      <div class="comment-author">${escapeHtml(c.author || 'Anonymous')}</div>
+      <div class="comment-heading">
+        <div class="comment-author">${escapeHtml(c.author || 'Anonymous')}</div>
+        ${c.kind ? `<span class="comment-kind">${escapeHtml(c.kind)}</span>` : ''}
+      </div>
       <div class="comment-text">${escapeHtml(truncate(c.text, 300))}</div>
     </div>
   `).join('');
@@ -380,6 +438,15 @@ async function renderPostDetail(urn) {
 
   const heading = data.title ? data.title.split('\n')[0] : `Post by ${data.author || 'Unknown'}`;
   const displayContent = data.summary || data.content || '';
+  const briefingHtml = renderBriefing(data.insight);
+  const coverage = data.source_coverage || {};
+  const coverageHtml = `
+    <div class="source-coverage">
+      <span>${coverage.articles || 0} articles</span>
+      <span>${coverage.useful_comments || 0} useful comments</span>
+      <span>${coverage.comment_resources || 0} community resources</span>
+    </div>
+  `;
 
   app().innerHTML = `
     <a href="#/" class="back-link">← Back</a>
@@ -391,13 +458,41 @@ async function renderPostDetail(urn) {
         ${data.date_raw ? `<span style="color:var(--text-muted);font-size:0.8rem">${escapeHtml(data.date_raw.split('•')[0].trim())}</span>` : ''}
       </div>
       ${topicsHtml ? `<div style="margin-top:var(--space-sm);display:flex;flex-wrap:wrap;gap:var(--space-xs)">${topicsHtml}</div>` : ''}
+      <div class="briefing-actions">
+        ${coverageHtml}
+        <button class="btn btn-ghost" id="btn-regenerate-briefing" data-urn="${escapeHtml(encodeURIComponent(data.urn))}" onclick="regenerateBriefing(this)">${data.insight ? 'Regenerate briefing' : 'Generate briefing'}</button>
+      </div>
     </div>
-    <div class="post-detail-content">${escapeHtml(displayContent)}</div>
+    ${briefingHtml || `<div class="post-detail-content">${escapeHtml(displayContent)}</div>`}
     ${data.source_url ? `<div style="margin-top:var(--space-md)"><a href="${escapeHtml(data.source_url)}" target="_blank" class="btn btn-ghost">View on LinkedIn →</a></div>` : ''}
     ${linksHtml ? `<div class="post-detail-section"><h3>External Links</h3>${linksHtml}</div>` : ''}
-    ${commentsHtml ? `<div class="post-detail-section"><h3>Comments</h3>${commentsHtml}</div>` : ''}
+    ${commentsHtml ? `<div class="post-detail-section"><h3>High-signal thread</h3>${commentsHtml}</div>` : ''}
     ${similarHtml ? `<div class="post-detail-section"><h3>Similar Posts</h3>${similarHtml}</div>` : ''}
+    ${data.insight && data.content ? `<details class="original-post"><summary>Original post</summary><div class="post-detail-content">${escapeHtml(data.content)}</div></details>` : ''}
   `;
+}
+
+async function regenerateBriefing(button) {
+  const urn = decodeURIComponent(button.dataset.urn || '');
+  if (!urn) return;
+  button.disabled = true;
+  button.textContent = 'Reasoning…';
+  try {
+    const result = await apiPost('/briefings', { urn });
+    if (!result.ok) {
+      showToast(result.error || 'Briefing generation failed', 'error');
+      return;
+    }
+    showToast('Briefing regenerated and synced to Obsidian', 'success');
+    await renderPostDetail(urn);
+  } catch (_) {
+    showToast('Briefing generation failed', 'error');
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.textContent = 'Regenerate briefing';
+    }
+  }
 }
 
 /* ── AUTHORS LIST ─────────────────────────────────────────────────────────── */
@@ -867,11 +962,13 @@ async function handleJsonUploadFile(file) {
 const PIPELINE_STAGES = [
   { id: 'ingest',         icon: '📥', name: 'Ingest' },
   { id: 'comments',       icon: '💬', name: 'Comments' },
+  { id: 'rank_comments',  icon: '🎯', name: 'Rank Comments' },
   { id: 'comment_enrich', icon: '🔗', name: 'Link Enrich' },
   { id: 'enrich',         icon: '🌐', name: 'Enrich' },
   { id: 'classify',       icon: '🏷️', name: 'Classify' },
   { id: 'embed',          icon: '🔢', name: 'Embed' },
   { id: 'subtopic',       icon: '🧬', name: 'Subtopics' },
+  { id: 'insights',       icon: '🧠', name: 'AI Briefings' },
   { id: 'semantic_edges', icon: '🕸️', name: 'Edges' },
   { id: 'graph_build',    icon: '🗺️', name: 'Graph Build' },
   { id: 'vault_write',    icon: '📝', name: 'Vault Write' },

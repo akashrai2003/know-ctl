@@ -100,6 +100,7 @@ def render_post_note(
     all_topic_names: list[str] | None = None,
     comment_links: list[dict] | None = None,
     related_posts: list[str] | None = None,
+    insight: dict | None = None,
 ) -> str:
     """Render an Obsidian note for a single post.
 
@@ -180,18 +181,22 @@ tags:
         body += f"_{subtitle_line}_\n"
     body += "\n"
 
-    if summary:
-        body += f"{_escape_wikilinks(summary)}\n"
-    else:
+    if insight:
+        body += _render_insight_body(insight)
+        if content.strip():
+            body += "\n## Original post\n\n"
+            body += f"{_escape_wikilinks(content.strip())}\n"
+    elif content.strip():
         body += f"{_escape_wikilinks(content.strip())}\n"
+    elif summary:
+        body += f"{_escape_wikilinks(summary)}\n"
 
-    # Links section — show enriched links if available, else extract raw URLs from content
     if external_links:
         body += "\n## Links\n"
         for lnk in external_links:
             url = lnk.get("url", "")
             lnk_title = lnk.get("title") or url
-            desc = lnk.get("description", "")
+            desc = lnk.get("ai_summary") or lnk.get("description") or ""
             body += f"\n- [{lnk_title}]({url})"
             if desc:
                 body += f"\n  > {_escape_wikilinks(desc)}"
@@ -207,20 +212,13 @@ tags:
     if source_url:
         body += f"\n[View on LinkedIn]({source_url})\n"
 
-    # Comments section — show top notable comments (those with a URL or long text)
     if comments:
-        notable = [
-            c for c in comments if c.get("has_external_url") or len(c.get("text", "")) > 100
-        ][:3]
-        if notable:
-            body += "\n## Comments\n"
-            for c in notable:
-                cauthor = c.get("author") or "Anonymous"
-                ctext = _escape_wikilinks(c.get("text", "").strip()[:400])
-                body += f"\n> **{cauthor}**: {ctext}\n"
+        body += "\n## Thread\n"
+        for c in comments[:15]:
+            cauthor = c.get("author") or "Anonymous"
+            ctext = _escape_wikilinks(c.get("text", "").strip()[:700])
+            body += f"\n> **{cauthor}**: {ctext}\n"
 
-    # Comment-sourced external links — shown separately so the reader knows
-    # these were shared by community members, not by the original author.
     if comment_links:
         body += "\n## Comment Links\n"
         for lnk in comment_links:
@@ -242,6 +240,63 @@ tags:
         body += "\n"
 
     return frontmatter + body
+
+
+def _render_insight_body(insight: dict) -> str:
+    body = ""
+    thesis = (insight.get("thesis") or "").strip()
+    if thesis:
+        body += "## Briefing\n\n"
+        body += f"{_escape_wikilinks(thesis)}\n"
+
+    takeaways = [str(x).strip() for x in (insight.get("article_takeaways") or []) if str(x).strip()]
+    if takeaways:
+        body += "\n## From the article\n"
+        for item in takeaways:
+            body += f"\n- {_escape_wikilinks(item)}"
+        body += "\n"
+
+    community = insight.get("community_insights") or []
+    if community:
+        body += "\n## Community insights\n"
+        for item in community:
+            if not isinstance(item, dict):
+                continue
+            author = item.get("author") or "Someone"
+            claim = (item.get("claim") or "").strip()
+            why = (item.get("why_it_matters") or "").strip()
+            if not claim:
+                continue
+            body += f"\n- **{_escape_wikilinks(author)}**: {_escape_wikilinks(claim)}"
+            if why:
+                body += f"\n  _{_escape_wikilinks(why)}_"
+        body += "\n"
+
+    resources = insight.get("resources") or []
+    if resources:
+        body += "\n## Resources\n"
+        for item in resources:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title") or item.get("url") or "Resource"
+            url = item.get("url") or ""
+            value = (item.get("value") or "").strip()
+            if url:
+                body += f"\n- [{_escape_wikilinks(title)}]({url})"
+            else:
+                body += f"\n- {_escape_wikilinks(title)}"
+            if value:
+                body += f"\n  > {_escape_wikilinks(value)}"
+        body += "\n"
+
+    questions = [str(x).strip() for x in (insight.get("open_questions") or []) if str(x).strip()]
+    if questions:
+        body += "\n## Open questions\n"
+        for item in questions:
+            body += f"\n- {_escape_wikilinks(item)}"
+        body += "\n"
+
+    return body
 
 
 def render_subtopic_note(

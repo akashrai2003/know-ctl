@@ -25,6 +25,9 @@ class CommentsPage:
         post_url = f"https://www.linkedin.com/feed/update/{urn}/"
         collected: list[dict] = []
 
+        if max_per_post <= 0:
+            return collected
+
         try:
             await self.page.goto(post_url, wait_until="domcontentloaded", timeout=30_000)
 
@@ -52,6 +55,11 @@ class CommentsPage:
             )
             while True:
                 try:
+                    visible_count = await self.page.locator(
+                        "article.comments-comment-entity"
+                    ).count()
+                    if visible_count >= max_per_post:
+                        break
                     btn = self.page.locator(load_more_sel).first
                     if not await btn.is_visible(timeout=2_000):
                         break
@@ -88,6 +96,18 @@ class CommentsPage:
                     break
                 await asyncio.sleep(0.5)
 
+            # Expand truncated comment bodies so the knowledge ranker receives
+            # the complete claim rather than LinkedIn's preview text.
+            see_more_sel = (
+                "article.comments-comment-entity button.comments-comment-item__see-more-less-toggle, "
+                "article.comments-comment-entity button[aria-label*='see more'], "
+                "article.comments-comment-entity button[aria-label*='See more']"
+            )
+            for button in await self.page.locator(see_more_sel).all():
+                with contextlib.suppress(Exception):
+                    if await button.is_visible(timeout=300):
+                        await button.click(timeout=2_000)
+
             # ── Step 3: extract all visible comments + replies from DOM ───────
             batch = await self.page.evaluate(self.extract_comments_js)
             for i, c in enumerate(batch):
@@ -103,5 +123,6 @@ class CommentsPage:
 
         except Exception as exc:
             logger.error("comments.page_failed", urn=urn, error=str(exc))
+            raise
 
         return collected[:max_per_post]

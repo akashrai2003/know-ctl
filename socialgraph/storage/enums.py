@@ -36,14 +36,23 @@ class PipelineStage(str, enum.Enum):
 
     INGEST = "ingest"
     COMMENTS = "comments"
+    RANK_COMMENTS = "rank_comments"
     COMMENT_ENRICH = "comment_enrich"
     ENRICH = "enrich"
     CLASSIFY = "classify"
     EMBED = "embed"
     SUBTOPIC = "subtopic"
+    INSIGHTS = "insights"
     SEMANTIC_EDGES = "semantic_edges"
     GRAPH_BUILD = "graph_build"
     VAULT_WRITE = "vault_write"
+
+
+class CommentKind(str, enum.Enum):
+    INSIGHT = "insight"
+    QUESTION = "question"
+    RESOURCE = "resource"
+    NOISE = "noise"
 
 
 class ConfidenceTag(str, enum.Enum):

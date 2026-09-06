@@ -10,7 +10,7 @@ Transform saved posts from social media platforms into an interactive, interconn
 
 ## Overview
 
-Social Graph bridges social content consumption and personal knowledge management (PKM). It aggregates high-value saved posts and discussions across your social platforms, crawls and extracts referenced external web articles, scrapes discussion comments, generates local vector embeddings, maps topics using hybrid LLM routing (local models + Groq), clusters communities via the Leiden algorithm, and outputs a linked Obsidian Markdown vault.
+Social Graph bridges social content consumption and personal knowledge management (PKM). It turns each saved post into an evidence-backed briefing by combining the original post, linked articles, high-signal discussion claims, questions, and community-shared resources. It then maps those briefings into a searchable topic and similarity graph and exports them to Obsidian.
 
 While LinkedIn is the initial production connector, Social Graph is engineered as a universal social media knowledge aggregator. Notes are structured in platform-specific subtrees (`linkedin/`, `reddit/`, `x/`, `substack/`) with shared cross-platform topic graphs and semantic similarity links. **Reddit integration is next on the roadmap**, followed by X (Twitter) and Substack.
 
@@ -24,13 +24,15 @@ The project includes a web application with an onboarding wizard, interactive se
 - **Encrypted Local Storage**: Machine-derived Fernet AES encryption stores credentials securely in local SQLite (`.socialgraph/socialgraph.db`).
 - **Multi-Platform Architecture**: Platform-partitioned knowledge storage (`linkedin/`, `reddit/`, `x/`) unified by cross-platform topic taxonomies and semantic search.
 - **Hybrid LLM Pipeline**:
-  - **Local Models** (vLLM, llama.cpp, Ollama, LM Studio): High-throughput classification and batch subtopic detection. Automatically detects `/v1/chat/completions/batch` support and falls back to concurrent async requests when needed.
-  - **Groq API**: High-speed reasoning with Qwen and Llama models for community clustering and graph synthesis.
+  - **Local Models** (vLLM, llama.cpp, Ollama, LM Studio): High-throughput article summaries, ambiguous-comment ranking, context-aware classification, and subtopic detection. The client automatically detects batch support and falls back to concurrent requests.
+  - **Groq API**: Cross-source reasoning over the post, article, and thread to produce structured briefings with a thesis, takeaways, community claims, resources, and open questions. Groq also provides a functional fallback when no local model is configured.
 - **Dual Ingestion Modes**: Upload official data archive JSON exports or live-scrape posts and comments using Playwright (credentials or session cookie).
-- **Deep URL and Comment Enrichment**: Crawls linked web pages with `trafilatura` and extracts thread discussions to retain full context.
+- **Comment Intelligence**: Scans up to 80 comments by default, expands long bodies and replies, scores information value, and filters applause or promotional noise before synthesis.
+- **Deep URL and Comment Enrichment**: Crawls links from both posts and useful comments with `trafilatura`, then summarizes the extracted article text.
+- **Freshness-Aware Briefings**: Evidence hashes automatically invalidate a briefing when its post, article, or useful thread context changes.
 - **Local Vector Embeddings**: Generates embeddings locally using `sentence-transformers` with vectorized matrix similarity calculations.
 - **Obsidian Vault Synthesis**: Writes clean Markdown files with YAML frontmatter, bidirectional wikilinks (`[[post_...]]`), topic Maps of Content (MOCs), and author profiles.
-- **Model Context Protocol (MCP)**: Query your knowledge graph directly from Claude Desktop or custom AI agent workflows.
+- **Model Context Protocol (MCP)**: Query structured briefings directly with `get_briefing`, alongside semantic search, topic, author, graph, and timeline tools.
 
 ---
 
@@ -110,6 +112,12 @@ sg init
 sg run
 ```
 
+For an existing installation, apply the latest schema before running the new intelligence stages:
+
+```bash
+alembic upgrade head
+```
+
 Values configured via the Web UI are stored in SQLite and take precedence over `.env` defaults.
 
 ---
@@ -117,50 +125,24 @@ Values configured via the Web UI are stored in SQLite and take precedence over `
 ## Architecture
 
 ```text
- Saved Posts (JSON Export or Live Scraper)
-                     |
-                     v
-             +---------------+
-             | [1]  Ingest   | ---> SQLite (.socialgraph/socialgraph.db)
-             +-------+-------+
-                     |
-                     v
-             +---------------+
-             | [2] Comments  | ---> Comment threads & discussions
-             +-------+-------+
-                     |
-                     v
-             +---------------+
-             | [3]  Enrich   | ---> trafilatura + httpx (external article text)
-             +-------+-------+
-                     |
-                     v
-             +---------------+
-             | [4] Classify  | ---> Hybrid LLM (vLLM / llama.cpp batch)
-             +-------+-------+
-                     |
-                     v
-             +---------------+
-             | [5]   Embed   | ---> Local SentenceTransformers (Qwen-0.6B)
-             +-------+-------+
-                     |
-                     v
-             +---------------+
-             | [6] Graph-Bld | ---> Groq (Llama-3.3-70b / Qwen) -> graphifyy Leiden
-             +-------+-------+
-                     |
-                     v
-             +---------------+
-             | [7] Vault-Wrt | ---> Markdown files with [[wikilinks]] -> ./vault/{platform}/
-             +---------------+
+Saved posts
+  -> ingest
+  -> collect comments and replies
+  -> rank useful claims / questions / resources
+  -> fetch links from the post and useful comments
+  -> classify with the combined context
+  -> embed and organize into subtopics
+  -> synthesize an evidence-backed AI briefing
+  -> build semantic and topic graph edges
+  -> write Obsidian notes, topic MOCs, and author pages
 ```
 
 ### LLM Task Matrix
 
 | Component | Responsibility | Recommended Model | Mode |
 |:---|:---|:---|:---|
-| **Groq API** | Community detection, graph synthesis, reasoning | `llama-3.3-70b-versatile` / `qwen/qwen3.6-27b` | Cloud API |
-| **Local Model** | Fast post topic classification & subtopic mapping | `Qwen/Qwen3.5-9B-FP8` | Batch / Async |
+| **Groq API** | Multi-source briefing synthesis and difficult fallbacks | `llama-3.3-70b-versatile` with configured fallbacks | Cloud API |
+| **Local Model** | Article summaries, comment ranking, classification, title and subtopic generation | `Qwen/Qwen3.5-9B-FP8` | Batch / Async |
 | **Local Embeddings** | Vector similarity & cosine graph edges | `Qwen/Qwen3-Embedding-0.6B` | Local (CUDA/CPU) |
 
 ---
@@ -184,11 +166,15 @@ sg run --live                    # Use live Playwright scraper instead of JSON
 sg ingest --json <file>          # Ingest posts from a JSON archive
 sg scrape                        # Launch browser to scrape saved posts live
 sg comments                      # Fetch post comments and discussion threads
+sg rank-comments                 # Score comments and remove applause/promo noise
 sg enrich                        # Crawl and summarize linked URLs
 sg comment-enrich                # Fetch and summarize links inside comments
 sg classify                      # Categorize posts according to topic taxonomy
 sg embed                         # Compute vector embeddings for all posts
 sg subtopic                      # Detect granular subtopics per category
+sg insights                      # Generate missing/stale evidence-backed briefings
+sg brief <urn>                   # Regenerate one briefing and one Obsidian note
+sg brief <urn> --fetch-comments  # Refresh its thread before briefing
 sg semantic-edges                # Build cosine similarity graph edges
 sg build-graph                   # Cluster communities using Leiden algorithm
 sg vault-write                   # Generate Markdown files in Obsidian vault
@@ -217,7 +203,7 @@ Settings can be managed in **Web UI -> Settings** or set in `.env`:
 
 | Setting | Env Variable | Default | Description |
 |:---|:---|:---|:---|
-| **Groq API Key** | `SG_GROQ_API_KEY` | `""` | Required for graph reasoning and synthesis |
+| **Groq API Key** | `SG_GROQ_API_KEY` | `""` | Required for briefing synthesis |
 | **Groq Model** | `SG_GROQ_MODEL` | `llama-3.3-70b-versatile` | Primary reasoning model |
 | **Local Model URL** | `SG_VLLM_BASE_URL` | `""` | Local OpenAI-compatible server URL |
 | **Local Model ID** | `SG_VLLM_MODEL` | `Qwen/Qwen3.5-9B-FP8` | Model ID for classification |
@@ -227,7 +213,7 @@ Settings can be managed in **Web UI -> Settings** or set in `.env`:
 | **LinkedIn Password** | `SG_LINKEDIN_PASSWORD` | `""` | Account password for live scraping |
 | **LinkedIn Cookie** | `SG_LINKEDIN_COOKIE` | `""` | `li_at` session cookie for MFA bypass |
 | **Batch Size** | `SG_BATCH_SIZE` | `10` | Concurrency batch size for LLM calls |
-| **Max Comments** | `SG_MAX_COMMENTS` | `5` | Comments per post to scrape |
+| **Max Comments** | `SG_MAX_COMMENTS` | `80` | Maximum thread comments scanned per post; only high-signal comments are kept in briefings |
 | **Obsidian Vault** | `SG_OBSIDIAN_VAULT_PATH` | `./vault` | Output directory for Markdown notes |
 | **Web Port** | `SG_WEB_PORT` | `8080` | Local dashboard server port |
 

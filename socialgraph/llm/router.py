@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from socialgraph.compat import StrEnum
 from socialgraph.llm.large_client import GroqClient
-from socialgraph.llm.small_client import BatchLLMClient
+from socialgraph.llm.small_client import BatchLLMClient, GroqBatchClient, HybridLLMClient
+
+BatchClient = BatchLLMClient | HybridLLMClient | GroqBatchClient
 
 
 class TaskComplexity(StrEnum):
@@ -18,10 +20,11 @@ ROUTING_TABLE: dict[str, TaskComplexity] = {
     "parse_link_metadata": TaskComplexity.SMALL_BATCH,
     "summarize_content": TaskComplexity.SMALL_BATCH,
     "generate_post_title_subtopic": TaskComplexity.SMALL_BATCH,
+    "rank_comments": TaskComplexity.SMALL_BATCH,
     # Small single — moderate volume
     "extract_url_content": TaskComplexity.SMALL_SINGLE,
     "classify_comment": TaskComplexity.SMALL_SINGLE,
-    # Large — once-per-run or architectural decisions
+    # Large — reasoning over post + article + thread
     "synthesize_taxonomy": TaskComplexity.LARGE,
     "build_graph_structure": TaskComplexity.LARGE,
     "expand_taxonomy": TaskComplexity.LARGE,
@@ -32,7 +35,7 @@ ROUTING_TABLE: dict[str, TaskComplexity] = {
 class LLMRouter:
     """Routes LLM tasks to appropriate client backends based on task complexity."""
 
-    def __init__(self, batch_client: BatchLLMClient, groq_client: GroqClient | None) -> None:
+    def __init__(self, batch_client: BatchClient, groq_client: GroqClient | None) -> None:
         """Initialize the router with batch and large model clients.
 
         Args:
@@ -42,7 +45,7 @@ class LLMRouter:
         self._batch = batch_client
         self._groq = groq_client
 
-    def get_client(self, task: str) -> BatchLLMClient | GroqClient:
+    def get_client(self, task: str) -> BatchClient | GroqClient:
         """Retrieve the appropriate LLM client for a given task.
 
         Args:
@@ -68,7 +71,7 @@ class LLMRouter:
         return ROUTING_TABLE.get(task) == TaskComplexity.SMALL_BATCH
 
     @property
-    def batch_client(self) -> BatchLLMClient:
+    def batch_client(self) -> BatchClient:
         """Get the underlying batch LLM client.
 
         Returns:

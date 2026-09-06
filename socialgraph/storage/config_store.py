@@ -20,8 +20,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from cryptography.fernet import Fernet
-from sqlalchemy import Column, DateTime, String, Text, select
+from sqlalchemy import DateTime, String, Text, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapped, mapped_column
 
 from socialgraph.storage.models import Base
 
@@ -35,12 +36,10 @@ class AppConfig(Base):
 
     __tablename__ = "app_config"
 
-    key: str = Column(String(120), primary_key=True, nullable=False)
-    value: str = Column(Text, nullable=True)  # Fernet-encrypted if sensitive
-    is_secret: bool = Column(  # type: ignore[assignment]
-        String(1), nullable=False, default="0"
-    )
-    updated_at: datetime = Column(  # type: ignore[assignment]
+    key: Mapped[str] = mapped_column(String(120), primary_key=True, nullable=False)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)  # encrypted if sensitive
+    is_secret: Mapped[str] = mapped_column(String(1), nullable=False, default="0")
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),

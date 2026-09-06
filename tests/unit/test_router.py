@@ -29,6 +29,8 @@ def test_groq_returned_for_large_tasks():
     router = LLMRouter(batch, groq)
     client = router.get_client("synthesize_taxonomy")
     assert client is groq
+    assert router.get_client("synthesize_insights") is groq
+    assert router.get_client("rank_comments") is batch
 
 
 def test_unknown_task_defaults_to_small():

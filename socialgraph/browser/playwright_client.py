@@ -110,7 +110,12 @@ class PlaywrightClient:
         comments_page = CommentsPage(page, self._settings, EXTRACT_COMMENTS_JS)
 
         for urn in urns:
-            results[urn] = await comments_page.fetch_comments_for_urn(urn, max_per_post)
+            try:
+                results[urn] = await comments_page.fetch_comments_for_urn(urn, max_per_post)
+            except Exception as exc:
+                # Omit failed URNs so CommentAgent leaves them retryable instead
+                # of permanently recording a successful empty thread.
+                logger.warning("comments.urn_failed", urn=urn, error=str(exc))
             await asyncio.sleep(0.5)
 
         await page.close()

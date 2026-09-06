@@ -35,6 +35,7 @@ class PostOut(BaseModel):
     source_url: str | None = None
     topics: list[str] = []
     score: float | None = None  # semantic search score
+    has_briefing: bool = False
 
 
 class PostDetailOut(BaseModel):
@@ -52,6 +53,9 @@ class PostDetailOut(BaseModel):
     external_links: list[dict] = []
     comments: list[dict] = []
     similar_posts: list[dict] = []
+    insight: dict | None = None
+    insight_generated_at: str | None = None
+    source_coverage: dict = {}
 
 
 class AuthorOut(BaseModel):
@@ -110,6 +114,10 @@ class StatsOut(BaseModel):
     total_embeddings: int = 0
     total_external_links: int = 0
     total_comments: int = 0
+    total_briefings: int = 0
+    briefing_coverage: float = 0.0
+    total_useful_comments: int = 0
+    useful_comments_last_7_days: int = 0
     top_topics: list[dict] = []
     top_authors: list[dict] = []
     last_pipeline_run: dict | None = None
@@ -133,7 +141,7 @@ class SettingsOut(BaseModel):
     linkedin_cookie: str = ""
     batch_size: str = "10"
     llm_timeout: str = "580.0"
-    max_comments: str = "5"
+    max_comments: str = "80"
     schedule_interval_hours: str = "6.0"
     db_path: str = ""
     workspace_dir: str = ""
@@ -187,6 +195,10 @@ class PipelineRunRequest(BaseModel):
     only_stage: str | None = None
     live: bool = False
     json_filename: str | None = None  # filename inside workspace dir
+
+
+class BriefingRunRequest(BaseModel):
+    urn: str
 
 
 class PipelineStatusOut(BaseModel):

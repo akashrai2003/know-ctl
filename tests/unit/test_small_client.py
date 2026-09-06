@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
 from pytest_httpx import HTTPXMock
 
-from socialgraph.llm.small_client import BatchLLMClient
+from socialgraph.llm.small_client import BatchLLMClient, GroqBatchClient
 
 
 def test_repair_json() -> None:
@@ -31,6 +33,21 @@ def test_repair_json() -> None:
 async def test_batch_chat_empty() -> None:
     client = BatchLLMClient("http://vllm/batch", "model-name")
     assert await client.batch_chat([]) == []
+
+
+@pytest.mark.asyncio
+async def test_groq_batch_adapter_preserves_batch_order() -> None:
+    client = MagicMock()
+    client.complete.side_effect = [{"value": 1}, {"value": 2}]
+    adapter = GroqBatchClient(client, concurrency=1)
+
+    result = await adapter.batch_chat(
+        [[{"role": "user", "content": "one"}], [{"role": "user", "content": "two"}]],
+        response_format={"type": "json_object"},
+    )
+
+    assert result == [{"value": 1}, {"value": 2}]
+    assert client.complete.call_count == 2
 
 
 @pytest.mark.asyncio

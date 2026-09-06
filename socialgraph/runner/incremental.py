@@ -13,10 +13,12 @@ from socialgraph.agents.base import StageContext
 from socialgraph.agents.classify_agent import ClassifyAgent
 from socialgraph.agents.comment_agent import CommentAgent
 from socialgraph.agents.comment_enrich_agent import CommentEnrichAgent
+from socialgraph.agents.comment_rank_agent import CommentRankAgent
 from socialgraph.agents.embed_agent import EmbedAgent
 from socialgraph.agents.enrich_agent import EnrichAgent
 from socialgraph.agents.graph_build_agent import GraphBuildAgent
 from socialgraph.agents.ingest_agent import IngestAgent
+from socialgraph.agents.insight_agent import InsightAgent
 from socialgraph.agents.semantic_edge_agent import SemanticEdgeAgent
 from socialgraph.agents.subtopic_agent import SubtopicAgent
 from socialgraph.agents.vault_write_agent import VaultWriteAgent
@@ -27,24 +29,9 @@ logger = structlog.get_logger(__name__)
 
 
 def _get_router(settings: Settings):
-    from socialgraph.llm.large_client import GroqClient
-    from socialgraph.llm.router import LLMRouter
-    from socialgraph.llm.small_client import BatchLLMClient
+    from socialgraph.llm.factory import build_router
 
-    batch = BatchLLMClient(
-        batch_url=settings.vllm_batch_url,
-        model=settings.vllm_model,
-        timeout=settings.llm_timeout,
-    )
-    groq = None
-    if settings.groq_api_key:
-        groq = GroqClient(
-            api_key=settings.groq_api_key,
-            model=settings.groq_model,
-            base_url=settings.groq_base_url,
-            fallback_models=settings.groq_fallback_models,
-        )
-    return LLMRouter(batch, groq)
+    return build_router(settings)
 
 
 def _get_taxonomy(settings: Settings):
@@ -82,8 +69,18 @@ async def run_incremental_pipeline(settings: Settings) -> dict[str, Any]:
         comment_agent = CommentAgent(max_per_post=settings.max_comments)
         await comment_agent.run(ctx)
 
-    # Load shared LLM router and taxonomy
+    # Load shared LLM router before ranking so ambiguous comments can use the
+    # local small model (or the bounded Groq fallback).
     router = _get_router(settings)
+
+    logger.info("incremental_pipeline.stage", stage="rank_comments")
+    async with get_session(factory) as session:
+        ctx = StageContext(
+            run_id="scheduler-rank-comments", settings=settings, db=session, stage="rank_comments"
+        )
+        await CommentRankAgent(router=router).run(ctx)
+
+    # Load the taxonomy used by the remaining knowledge stages.
     taxonomy = _get_taxonomy(settings)
 
     # 3. Comment enrichment stage
@@ -129,6 +126,13 @@ async def run_incremental_pipeline(settings: Settings) -> dict[str, Any]:
         )
         subtopic_agent = SubtopicAgent(router=router)
         await subtopic_agent.run(ctx)
+
+    logger.info("incremental_pipeline.stage", stage="insights")
+    async with get_session(factory) as session:
+        ctx = StageContext(
+            run_id="scheduler-insights", settings=settings, db=session, stage="insights"
+        )
+        await InsightAgent(router=router).run(ctx)
 
     # 8. Semantic similarity edges stage
     logger.info("incremental_pipeline.stage", stage="semantic_edges")

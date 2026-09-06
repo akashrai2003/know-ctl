@@ -116,10 +116,12 @@ class PipelineRunner:
             from socialgraph.agents.classify_agent import ClassifyAgent
             from socialgraph.agents.comment_agent import CommentAgent
             from socialgraph.agents.comment_enrich_agent import CommentEnrichAgent
+            from socialgraph.agents.comment_rank_agent import CommentRankAgent
             from socialgraph.agents.embed_agent import EmbedAgent
             from socialgraph.agents.enrich_agent import EnrichAgent
             from socialgraph.agents.graph_build_agent import GraphBuildAgent
             from socialgraph.agents.ingest_agent import IngestAgent
+            from socialgraph.agents.insight_agent import InsightAgent
             from socialgraph.agents.semantic_edge_agent import SemanticEdgeAgent
             from socialgraph.agents.subtopic_agent import SubtopicAgent
             from socialgraph.agents.vault_write_agent import VaultWriteAgent
@@ -137,11 +139,11 @@ class PipelineRunner:
 
             # Build LLM router
             router = None
-            if settings.groq_api_key:
+            if settings.groq_api_key or settings.vllm_base_url or settings.vllm_batch_url:
                 router = build_router(settings)
                 self._emit("info", "router.ready")
             else:
-                self._emit("warning", "router.skipped", reason="no groq_api_key configured")
+                self._emit("warning", "router.skipped", reason="no LLM provider configured")
 
             # Use default JSON file path if none provided
             if json_file is None:
@@ -157,15 +159,18 @@ class PipelineRunner:
                     live_mode=live,
                 ),
                 "comments": CommentAgent(max_per_post=settings.max_comments),
+                "rank_comments": CommentRankAgent(router=router),
+                "comment_enrich": CommentEnrichAgent(router=router),
+                "enrich": EnrichAgent(router=router),
                 "embed": EmbedAgent(batch_size=settings.batch_size),
                 "semantic_edges": SemanticEdgeAgent(),
                 "graph_build": GraphBuildAgent(),
                 "vault_write": VaultWriteAgent(),
             }
             if router:
-                agents["comment_enrich"] = CommentEnrichAgent(router=router)
-                agents["enrich"] = EnrichAgent(router=router)
                 agents["subtopic"] = SubtopicAgent(router=router)
+                if router.groq_client is not None:
+                    agents["insights"] = InsightAgent(router=router)
                 if taxonomy:
                     agents["classify"] = ClassifyAgent(router, taxonomy)
 
@@ -184,7 +189,6 @@ class PipelineRunner:
                         "processed": s.processed,
                         "skipped": s.skipped,
                         "failed": s.failed,
-                        "status": s.status,
                     }
                 )
                 self._emit(

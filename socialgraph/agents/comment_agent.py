@@ -16,34 +16,43 @@ BATCH_SIZE = 20  # URNs per Playwright page session
 class CommentAgent:
     name = "comments"
 
-    def __init__(self, limit: int = 0, force: bool = False, max_per_post: int = 50) -> None:
+    def __init__(
+        self,
+        limit: int = 0,
+        force: bool = False,
+        max_per_post: int = 80,
+        urns: list[str] | None = None,
+    ) -> None:
         self._limit = limit
         self._force = force
         self._max_per_post = max_per_post
+        self._urns = urns
 
     async def run(self, ctx: StageContext) -> StageOutput:
         repo = Repo(ctx.db)
 
-        if self._force:
-            # Reset all posts so they re-fetch comments, and delete stale comment
-            # rows so bulk_insert_comments doesn't skip them by rank match.
-            from sqlalchemy import select as sql_select
-            from sqlalchemy import update
+        if self._max_per_post == 0:
+            return StageOutput(
+                stage=self.name,
+                skipped=1,
+                meta={"reason": "comment fetching disabled (max_per_post=0)"},
+            )
 
-            from socialgraph.storage.models import Post
+        if self._urns:
+            posts = await repo.get_posts_by_urns(self._urns)
+            if not self._force:
+                posts = [p for p in posts if not p.comments_fetched]
+        else:
+            posts = await repo.get_posts_for_comments(
+                limit=self._limit, include_fetched=self._force
+            )
 
-            await ctx.db.execute(update(Post).values(comments_fetched=False))
-            await ctx.db.flush()
-
-            # Delete all existing comments so fresh data (incl. replies) replaces them
-            all_post_ids = list(await ctx.db.scalars(sql_select(Post.id)))
-            deleted_total = 0
-            for pid in all_post_ids:
-                deleted_total += await repo.delete_comments_for_post(pid)
+        if self._force and posts:
+            # Mark refresh targets retryable before network I/O, but retain the
+            # current rows until a successful replacement is available.
+            for post in posts:
+                post.comments_fetched = False
             await ctx.db.commit()
-            logger.info("comments.force_cleared", deleted=deleted_total)
-
-        posts = await repo.get_posts_needing_comments(limit=self._limit)
 
         if not posts:
             return StageOutput(
@@ -66,20 +75,29 @@ class CommentAgent:
                     )
             except Exception as exc:
                 logger.error("comments.batch_failed", batch_start=batch_start, error=str(exc))
-                for p in batch:
-                    p.comments_fetched = True  # mark done to avoid infinite retries
                 failed += len(batch)
-                await ctx.db.commit()
                 continue
 
+            missing_urns = set(urns) - set(comment_map)
+            failed += len(missing_urns)
+            for urn in missing_urns:
+                logger.warning("comments.post_retryable_failure", urn=urn)
+
             for urn, comments in comment_map.items():
-                post = urn_to_post.get(urn)
-                if not post:
+                matched_post = urn_to_post.get(urn)
+                if not matched_post:
                     continue
                 try:
-                    added = await repo.bulk_insert_comments(post.id, comments)
+                    async with ctx.db.begin_nested():
+                        if self._force:
+                            await repo.delete_comments_for_post(matched_post.id)
+                        added = await repo.bulk_insert_comments(matched_post.id, comments)
+                        matched_post.comments_fetched = True
+                        # Any thread refresh changes the evidence used by the briefing.
+                        matched_post.insight_json = None
+                        matched_post.insight_source_hash = None
+                        matched_post.insight_generated_at = None
                     total_comments += added
-                    post.comments_fetched = True
                     processed += 1
                 except Exception as exc:
                     logger.error("comments.insert_failed", urn=urn, error=str(exc))
@@ -100,5 +118,9 @@ class CommentAgent:
             stage=self.name,
             processed=processed,
             failed=failed,
-            meta={"total_comments": total_comments},
+            meta={
+                "total_comments": total_comments,
+                "retryable_failures": failed,
+                "scan_limit_per_post": self._max_per_post,
+            },
         )

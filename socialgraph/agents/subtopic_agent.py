@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from socialgraph.agents.base import StageContext, StageOutput
+from socialgraph.knowledge.post_context import build_post_context
 from socialgraph.llm.prompts import (
     GENERATE_POST_TITLE_SUBTOPIC_SYSTEM,
     GENERATE_POST_TITLE_SUBTOPIC_USER,
@@ -24,7 +25,7 @@ from socialgraph.llm.prompts import (
     MERGE_SUBTOPICS_USER,
 )
 from socialgraph.llm.router import LLMRouter
-from socialgraph.storage.models import Post, PostSubtopic, PostTopic
+from socialgraph.storage.models import Post, PostExternalLink, PostSubtopic, PostTopic
 from socialgraph.storage.repo import Repo
 
 logger = structlog.get_logger(__name__)
@@ -61,7 +62,7 @@ def _build_message(post: Post, topic_name: str, existing_subtopics: list[str]) -
             "content": GENERATE_POST_TITLE_SUBTOPIC_USER.format(
                 topic_name=topic_name,
                 existing_subtopics=subtopics_str,
-                content=post.content[:800],
+                content=build_post_context(post, max_chars=2200),
             ),
         },
     ]
@@ -84,6 +85,8 @@ class SubtopicAgent:
             .options(
                 selectinload(Post.post_topics).selectinload(PostTopic.topic),
                 selectinload(Post.post_subtopics),
+                selectinload(Post.comments),
+                selectinload(Post.post_links).selectinload(PostExternalLink.external_link),
             )
         )
         posts = list(result.all())

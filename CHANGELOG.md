@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Evidence-backed AI briefings synthesized from the original post, linked articles, useful comments, and comment-shared resources.
+- Hybrid comment usefulness ranking with deterministic filtering, local-model review, and insight, question, resource, or noise labels.
+- Freshness hashes and automatic invalidation when briefing evidence changes.
+- `sg insights`, `sg rank-comments`, and targeted `sg brief <urn>` commands.
+- Dashboard briefing coverage, community-intelligence metrics, structured briefing views, and one-click regeneration.
+- MCP `get_briefing` tool for structured AI-agent retrieval.
+
+### Fixed
+- Comment-scrape failures remain retryable instead of being recorded as successful empty threads.
+- Forced comment refreshes no longer delete existing comments before a replacement scrape succeeds.
+- Web pipeline result serialization now handles stage outputs correctly.
+- Groq-only installations can run batch-shaped small-model tasks when no local server is configured.
+
 ## [0.1.0] - 2026-06-16
 
 ### Added

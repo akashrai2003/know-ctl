@@ -1,5 +1,23 @@
 async (knownUrnsArray) => {
     const knownUrns = new Set(knownUrnsArray || []);
+    async function reportProgress(payload) {
+        try {
+            if (typeof window.sgReportSavedPostsProgress === "function") {
+                await window.sgReportSavedPostsProgress(payload);
+            }
+        } catch (_) {}
+    }
+
+    async function fetchWithTimeout(url, options, timeoutMs = 30000) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+            clearTimeout(timer);
+        }
+    }
+
     const csrf = document.cookie
         .split("; ")
         .find(r => r.startsWith("JSESSIONID="))
@@ -31,6 +49,7 @@ async (knownUrnsArray) => {
     const baseUrl = raw.replace("mark_bigpipe_", "").replace("_start", "");
 
     let allPosts = [], seenUrns = new Set(), start = 0, paginationToken = null;
+    let pageCount = 0, paginationError = null;
 
     while (true) {
         let url = baseUrl.replace(/start:\d+/, `start:${start}`);
@@ -40,15 +59,26 @@ async (knownUrnsArray) => {
                 : url.replace("query:(", `paginationToken:${paginationToken},query:(`);
         }
 
-        const res = await fetch(url, {
-            credentials: "include",
-            headers: {
-                "csrf-token": csrf,
-                "accept": "application/json",
-                "x-restli-protocol-version": "2.0.0"
-            }
-        });
-        if (!res.ok) break;
+        let res;
+        try {
+            res = await fetchWithTimeout(url, {
+                credentials: "include",
+                headers: {
+                    "csrf-token": csrf,
+                    "accept": "application/json",
+                    "x-restli-protocol-version": "2.0.0"
+                }
+            });
+        } catch (error) {
+            paginationError = `request failed at page ${pageCount + 1}: ${error?.message || error}`;
+            await reportProgress({ phase: "pagination_error", pages: pageCount, extracted: allPosts.length });
+            break;
+        }
+        if (!res.ok) {
+            paginationError = `HTTP ${res.status} at page ${pageCount + 1}`;
+            await reportProgress({ phase: "pagination_error", pages: pageCount, extracted: allPosts.length });
+            break;
+        }
 
         const json = await res.json();
         const posts = findPosts(json);
@@ -61,6 +91,8 @@ async (knownUrnsArray) => {
             }
             if (!seenUrns.has(p.urn)) { seenUrns.add(p.urn); allPosts.push(p); newCount++; }
         }
+        pageCount++;
+        await reportProgress({ phase: "pagination", pages: pageCount, extracted: allPosts.length });
 
         const nextToken = json?.data?.searchDashClustersByAll?.metadata?.paginationToken
             || json?.data?.data?.searchDashClustersByAll?.metadata?.paginationToken;
@@ -157,6 +189,8 @@ async (knownUrnsArray) => {
     }
 
     const hydrationErrors = [];
+    const hydrationTotal = allPosts.filter(isLikelyRepost).length;
+    let hydrated = 0;
 
     for (let i = 0; i < allPosts.length; i++) {
         const post = allPosts[i];
@@ -250,8 +284,17 @@ async (knownUrnsArray) => {
             hydrationErrors.push({ urn: post.urn, error: "no_originals_found" });
         }
 
+        hydrated++;
+        await reportProgress({
+            phase: "hydration",
+            pages: pageCount,
+            extracted: allPosts.length,
+            hydrated,
+            hydrationTotal
+        });
+
         await new Promise(r => setTimeout(r, 1200 + Math.random() * 1500));
     }
 
-    return { posts: allPosts, hydrationErrors };
+    return { posts: allPosts, hydrationErrors, paginationError };
 }

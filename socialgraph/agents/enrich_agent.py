@@ -20,7 +20,7 @@ from sqlalchemy import select, update
 
 from socialgraph.agents.base import StageContext, StageOutput
 from socialgraph.storage.enums import FetchStatus, PostStatus
-from socialgraph.storage.models import ExternalLink, Post
+from socialgraph.storage.models import ExternalLink, Post, PostExternalLink
 from socialgraph.storage.repo import Repo
 
 UTC = timezone.utc
@@ -30,8 +30,8 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
-FETCH_TIMEOUT = 15.0
-MAX_RESPONSE_BYTES = 3_000_000
+FETCH_TIMEOUT = 10.0
+MAX_RESPONSE_BYTES = 2_000_000
 CONCURRENCY = 10
 PW_CONCURRENCY = 3  # Max concurrent Playwright fetches (browser tabs)
 
@@ -108,9 +108,6 @@ class EnrichAgent:
         result = await ctx.db.scalars(select(Post).where(Post.status.in_(["ingested", "pending"])))
         posts = list(result.all())
 
-        if not posts:
-            return StageOutput(stage=self.name, skipped=1, meta={"reason": "no posts to enrich"})
-
         repo = Repo(ctx.db)
         semaphore = asyncio.Semaphore(CONCURRENCY)
         # Serialise all DB writes — prevents concurrent ORM autoflush races
@@ -166,45 +163,70 @@ class EnrichAgent:
 
         await ctx.db.commit()
 
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
-            pw_sem = asyncio.Semaphore(PW_CONCURRENCY)
+        # Existing completed posts can still contain a body link reset above.
+        # Pull only those affected posts back into the fetch pass without
+        # reprocessing every completed post on each incremental run.
+        pending_rows = await ctx.db.scalars(
+            select(Post)
+            .join(PostExternalLink, PostExternalLink.post_id == Post.id)
+            .join(ExternalLink, ExternalLink.id == PostExternalLink.external_link_id)
+            .where(
+                PostExternalLink.context == "body",
+                ExternalLink.fetch_status == FetchStatus.PENDING.value,
+            )
+            .distinct()
+        )
+        known_ids = {post.id for post in posts}
+        posts.extend(post for post in pending_rows.all() if post.id not in known_ids)
 
-            async with httpx.AsyncClient(
-                timeout=FETCH_TIMEOUT,
-                headers={
-                    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-                },
-                follow_redirects=True,
-            ) as client:
+        if posts:
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch(headless=True)
+                pw_sem = asyncio.Semaphore(PW_CONCURRENCY)
 
-                async def enrich_one(post: Post) -> None:
-                    nonlocal processed, failed
-                    async with semaphore:
-                        try:
-                            await _enrich_post(post, repo, client, browser, pw_sem, db_sem)
-                            async with db_sem:
-                                post.status = PostStatus.ENRICHED.value
-                                await repo.flush()
-                            processed += 1
-                        except Exception as exc:
-                            logger.error("enrich.post_failed", urn=post.urn, error=str(exc))
-                            failed += 1
+                async with httpx.AsyncClient(
+                    timeout=FETCH_TIMEOUT,
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                    },
+                    follow_redirects=True,
+                ) as client:
 
-                await asyncio.gather(*[enrich_one(p) for p in posts])
+                    async def enrich_one(post: Post) -> None:
+                        nonlocal processed, failed
+                        async with semaphore:
+                            try:
+                                await _enrich_post(post, repo, client, browser, pw_sem, db_sem)
+                                async with db_sem:
+                                    post.status = PostStatus.ENRICHED.value
+                                    await repo.flush()
+                                processed += 1
+                            except Exception as exc:
+                                logger.error("enrich.post_failed", urn=post.urn, error=str(exc))
+                                failed += 1
 
-            await browser.close()
+                    await asyncio.gather(*[enrich_one(p) for p in posts])
 
-        await ctx.db.commit()
+                await browser.close()
 
-        # ── vLLM summarization pass ──────────────────────────────────────
-        if self._router:
-            summ_log = Path(ctx.settings.workspace_dir) / "logs" / "summarization.jsonl"
-            await _summarize_links(ctx.db, self._router, summ_log)
             await ctx.db.commit()
 
-        logger.info("enrich.complete", processed=processed, failed=failed)
-        return StageOutput(stage=self.name, processed=processed, failed=failed)
+        # ── vLLM summarization pass ──────────────────────────────────────
+        summarized = 0
+        if self._router:
+            summ_log = Path(ctx.settings.workspace_dir) / "logs" / "summarization.jsonl"
+            summarized = await _summarize_links(ctx.db, self._router, summ_log)
+            await ctx.db.commit()
+
+        logger.info("enrich.complete", processed=processed, summarized=summarized, failed=failed)
+        nothing_to_do = processed == 0 and failed == 0 and summarized == 0
+        return StageOutput(
+            stage=self.name,
+            processed=processed,
+            skipped=1 if nothing_to_do else 0,
+            failed=failed,
+            meta={"summarized": summarized},
+        )
 
 
 async def _enrich_post(
@@ -618,7 +640,7 @@ async def _fetch_github_readme(user: str, repo: str, client: httpx.AsyncClient) 
     return None
 
 
-async def _summarize_links(db, router: LLMRouter, log_path: Path) -> None:  # type: ignore[type-arg]
+async def _summarize_links(db, router: LLMRouter, log_path: Path) -> int:  # type: ignore[type-arg]
     """Batch-summarize all fetched ExternalLinks that have body_excerpt but no ai_summary.
 
     Every prompt + response is appended to log_path as JSONL for quality inspection.
@@ -636,13 +658,14 @@ async def _summarize_links(db, router: LLMRouter, log_path: Path) -> None:  # ty
     links = list(result.all())
     if not links:
         logger.info("enrich.summarize_skip", reason="no links need summarization")
-        return
+        return 0
 
     logger.info("enrich.summarize_start", count=len(links))
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_fh = log_path.open("a", encoding="utf-8")
     client = router.batch_client
     batch_size = 10
+    summarized = 0
 
     try:
         for i in range(0, len(links), batch_size):
@@ -669,6 +692,7 @@ async def _summarize_links(db, router: LLMRouter, log_path: Path) -> None:  # ty
                 for lnk, messages, summary in zip(batch, messages_list, results, strict=False):
                     if summary and isinstance(summary, str):
                         lnk.ai_summary = summary.strip()[:2000]
+                        summarized += 1
                     log_fh.write(
                         json.dumps(
                             {
@@ -687,3 +711,4 @@ async def _summarize_links(db, router: LLMRouter, log_path: Path) -> None:  # ty
         log_fh.close()
 
     logger.info("enrich.summarize_done", count=len(links), log=str(log_path))
+    return summarized

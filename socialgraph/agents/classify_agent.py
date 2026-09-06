@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import structlog
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from socialgraph.agents.base import StageContext, StageOutput
+from socialgraph.knowledge.post_context import build_post_context
 from socialgraph.knowledge.taxonomy import Taxonomy
 from socialgraph.llm.prompts import CLASSIFY_POST_TOPICS_SYSTEM, CLASSIFY_POST_TOPICS_USER
 from socialgraph.llm.router import LLMRouter
 from socialgraph.storage.enums import PostStatus
-from socialgraph.storage.models import Post
+from socialgraph.storage.models import Post, PostExternalLink
 from socialgraph.storage.repo import Repo
 
 logger = structlog.get_logger(__name__)
@@ -42,12 +44,20 @@ class ClassifyAgent:
 
     async def run(self, ctx: StageContext) -> StageOutput:
 
-        result = await ctx.db.scalars(select(Post).where(Post.status.in_(["enriched", "ingested"])))
+        _load = (
+            selectinload(Post.comments),
+            selectinload(Post.post_links).selectinload(PostExternalLink.external_link),
+        )
+        result = await ctx.db.scalars(
+            select(Post).where(Post.status.in_(["enriched", "ingested"])).options(*_load)
+        )
         posts = list(result.all())
 
-        # Also reclassify posts that already completed the pipeline but have no topics
         unclassified_result = await ctx.db.scalars(
-            select(Post).where(Post.status.in_(["ok", "graphed"])).where(~Post.post_topics.any())
+            select(Post)
+            .where(Post.status.in_(["ok", "graphed"]))
+            .where(~Post.post_topics.any())
+            .options(*_load)
         )
         unclassified_posts = list(unclassified_result.all())
         # Track which ones were previously done so we can reset their status
@@ -72,7 +82,7 @@ class ClassifyAgent:
                         "role": "user",
                         "content": CLASSIFY_POST_TOPICS_USER.format(
                             topics=topics_prompt,
-                            content=p.content[:800],
+                            content=build_post_context(p, max_chars=2200),
                         ),
                     },
                 ]
@@ -103,7 +113,11 @@ async def _apply_classification(
         # Escalate to Groq if small model produced nothing
         groq = router.groq_client
         if groq is not None:
-            prompt = f'List 1-3 topics for this post:\n{post.content[:600]}\nRespond as JSON {{"topics": [], "confidence": 0.0}}'
+            prompt = (
+                "List 1-3 topics for this post using the full context:\n"
+                f"{build_post_context(post, max_chars=1200)}\n"
+                'Respond as JSON {"topics": [], "confidence": 0.0}'
+            )
             res = groq.complete(
                 [{"role": "user", "content": prompt}],
                 response_format={"type": "json_object"},

@@ -312,6 +312,40 @@ a:hover { color: #c4b5fd; }
   margin-top: var(--space-xs);
 }
 
+.intelligence-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-lg);
+  padding: var(--space-lg);
+  margin-bottom: var(--space-xl);
+  background: linear-gradient(120deg, rgba(99, 102, 241, 0.13), rgba(34, 211, 238, 0.06));
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: var(--radius-lg);
+}
+
+.intelligence-kicker,
+.briefing-label {
+  color: var(--accent-cyan);
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.intelligence-value {
+  margin-top: 3px;
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.intelligence-copy {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
 /* ── Post Cards ───────────────────────────────────────────────────────────── */
 .post-list { display: flex; flex-direction: column; gap: var(--space-md); }
 
@@ -439,6 +473,110 @@ a:hover { color: #c4b5fd; }
   margin-bottom: var(--space-md);
 }
 
+.briefing-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-md);
+  margin-top: var(--space-lg);
+}
+
+.source-coverage {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+.source-coverage span,
+.comment-kind {
+  padding: 3px 9px;
+  color: var(--text-muted);
+  background: var(--bg-glass);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+.briefing-card {
+  padding: var(--space-xl);
+  background: linear-gradient(145deg, rgba(99, 102, 241, 0.09), rgba(13, 13, 20, 0.8));
+  border: 1px solid rgba(99, 102, 241, 0.25);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-glow);
+}
+
+.briefing-thesis {
+  margin-top: var(--space-sm);
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  line-height: 1.75;
+}
+
+.briefing-section {
+  margin-top: var(--space-xl);
+}
+
+.briefing-section h3 {
+  margin-bottom: var(--space-sm);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.briefing-section ul {
+  padding-left: var(--space-lg);
+  color: var(--text-secondary);
+}
+
+.briefing-section li {
+  margin-bottom: var(--space-xs);
+}
+
+.insight-claim {
+  padding: var(--space-md);
+  margin-bottom: var(--space-sm);
+  background: var(--bg-glass);
+  border-left: 3px solid var(--accent-cyan);
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+.insight-claim-author {
+  color: var(--accent-cyan);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.insight-claim-text {
+  margin-top: 3px;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+
+.insight-why {
+  margin-top: var(--space-xs);
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.original-post {
+  margin-top: var(--space-xl);
+  padding: var(--space-md) var(--space-lg);
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+
+.original-post summary {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.original-post .post-detail-content {
+  margin-top: var(--space-md);
+}
+
 /* ── Link Cards ───────────────────────────────────────────────────────────── */
 .link-card {
   background: var(--bg-glass);
@@ -478,6 +616,13 @@ a:hover { color: #c4b5fd; }
   font-weight: 600;
   color: var(--accent-violet);
   margin-bottom: var(--space-xs);
+}
+
+.comment-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm);
 }
 
 .comment-card .comment-text {
@@ -684,6 +829,7 @@ a:hover { color: #c4b5fd; }
   .author-grid { grid-template-columns: 1fr; }
   .stats-row { grid-template-columns: repeat(2, 1fr); }
   .page-title { font-size: 1.5rem; }
+  .intelligence-banner, .briefing-actions { align-items: flex-start; flex-direction: column; }
 }
 
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */
@@ -1380,4 +1526,3 @@ a:hover { color: #c4b5fd; }
   .pipeline-stage-list { grid-template-columns: repeat(2, 1fr); }
   .onboarding-modal { padding: var(--space-lg); }
 }
-

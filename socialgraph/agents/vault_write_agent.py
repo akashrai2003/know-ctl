@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime, timezone
 
 import structlog
@@ -10,6 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from socialgraph.agents.base import StageContext, StageOutput
 from socialgraph.agents.base import primary_topic as _primary_topic
+from socialgraph.knowledge.comment_rank import is_useful_comment, useful_comments
+from socialgraph.knowledge.insights import parse_insight
 from socialgraph.knowledge.obsidian import (
     VaultWriter,
     _slug,
@@ -37,6 +40,15 @@ logger = structlog.get_logger(__name__)
 class VaultWriteAgent:
     name = "vault_write"
 
+    def __init__(
+        self,
+        urns: list[str] | None = None,
+        *,
+        rebuild_collections: bool = True,
+    ) -> None:
+        self._urns = set(urns or [])
+        self._rebuild_collections = rebuild_collections
+
     async def run(self, ctx: StageContext) -> StageOutput:
         writer = VaultWriter(ctx.settings.obsidian_vault_path)
         result = await ctx.db.scalars(
@@ -50,9 +62,15 @@ class VaultWriteAgent:
             )
         )
         posts = list(result.all())
+        posts_to_write = [post for post in posts if not self._urns or post.urn in self._urns]
 
-        if not posts:
-            return StageOutput(stage=self.name, skipped=1, meta={"reason": "no graphed posts"})
+        if not posts_to_write:
+            reason = (
+                "requested posts are not ready for vault output"
+                if self._urns
+                else "no graphed posts"
+            )
+            return StageOutput(stage=self.name, skipped=1, meta={"reason": reason})
 
         # Load all embeddings if available for similar posts check
         from socialgraph.knowledge.search import build_similarity_map, load_embeddings
@@ -65,34 +83,35 @@ class VaultWriteAgent:
         similarity_map = build_similarity_map(all_embeddings, top_k=5, min_score=0.85)
         posts_by_id = {p.id: p for p in posts}
 
-        # Clear/re-populate the authors DB table
-        await ctx.db.execute(delete(Author))
-
         # Group posts by author for database storage and vault generation
         author_posts: dict[str, list[Post]] = {}
         for post in posts:
             if post.author:
                 author_posts.setdefault(post.author, []).append(post)
 
-        for author_name, posts_for_author in author_posts.items():
-            subtitles = [p.subtitle for p in posts_for_author if p.subtitle]
-            subtitle = subtitles[0] if subtitles else None
-            platform = posts_for_author[0].platform if posts_for_author else "linkedin"
+        if self._rebuild_collections:
+            # Clear/re-populate the denormalized authors DB table only during a
+            # full vault rebuild. A single-post briefing must not erase it.
+            await ctx.db.execute(delete(Author))
+            for author_name, posts_for_author in author_posts.items():
+                subtitles = [p.subtitle for p in posts_for_author if p.subtitle]
+                subtitle = subtitles[0] if subtitles else None
+                platform = posts_for_author[0].platform if posts_for_author else "linkedin"
 
-            author_obj = Author(
-                name=author_name,
-                slug=_slug(author_name),
-                subtitle=subtitle,
-                platform=platform,
-                post_count=len(posts_for_author),
-            )
-            ctx.db.add(author_obj)
+                author_obj = Author(
+                    name=author_name,
+                    slug=_slug(author_name),
+                    subtitle=subtitle,
+                    platform=platform,
+                    post_count=len(posts_for_author),
+                )
+                ctx.db.add(author_obj)
 
         # topic_subtopic_posts[topic_name][subtopic_name] = [post_entry, ...]
         topic_subtopic_posts: dict[str, dict[str, list[dict]]] = {}
         processed = failed = 0
 
-        for post in posts:
+        for post in posts_to_write:
             all_topic_names = [pt.topic.name for pt in post.post_topics]
             primary = _primary_topic(post)
             graph_topic_names = [primary] if primary else []
@@ -126,6 +145,8 @@ class VaultWriteAgent:
                     continue
                 lnk = pel.external_link
                 commenter_comment = comment_lookup.get(pel.comment_id) if pel.comment_id else None
+                if commenter_comment is not None and not is_useful_comment(commenter_comment):
+                    continue
                 comment_links_data.append(
                     {
                         "url": lnk.url,
@@ -139,19 +160,14 @@ class VaultWriteAgent:
                     }
                 )
 
-            comments_notable = (
-                any(c.has_external_url for c in post.comments)
-                if hasattr(post, "comments")
-                else False
-            )
-            notable_comments = (
-                [
-                    {"author": c.author, "text": c.text, "has_external_url": c.has_external_url}
-                    for c in post.comments
-                ]
-                if post.comments
-                else []
-            )
+            kept_comments = useful_comments(post.comments, limit=15)
+            comments_notable = bool(kept_comments)
+            notable_comments = [
+                {"author": c.author, "text": c.text, "has_external_url": c.has_external_url}
+                for c in kept_comments
+            ]
+            insight_obj = parse_insight(post.insight_json)
+            insight_dict = asdict(insight_obj) if insight_obj else None
 
             # Cosine similarity matching
             related_posts = []
@@ -186,6 +202,7 @@ class VaultWriteAgent:
                     topic_subtopic_map=topic_subtopic_map,
                     comment_links=comment_links_data or None,
                     related_posts=related_posts,
+                    insight=insight_dict,
                 )
                 writer.write_post(post.urn, note_content, platform=post.platform)
                 post.status = PostStatus.OK.value
@@ -219,6 +236,16 @@ class VaultWriteAgent:
                     topic_subtopic_posts.setdefault(primary, {}).setdefault(
                         sub_for_primary, []
                     ).append(entry)
+
+        if not self._rebuild_collections:
+            await ctx.db.commit()
+            logger.info("vault_write.targeted_complete", processed=processed, failed=failed)
+            return StageOutput(
+                stage=self.name,
+                processed=processed,
+                failed=failed,
+                meta={"targeted": True},
+            )
 
         # Write topic MOC files — grouped by platform
         # Collect the platform for each topic from the posts that reference it

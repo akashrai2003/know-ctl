@@ -478,8 +478,10 @@ class Repo:
 
     # ── Comment ───────────────────────────────────────────────────────────
 
-    async def get_posts_needing_comments(self, limit: int = 0) -> list[Post]:
-        """Fetch posts that haven't had comments fetched yet.
+    async def get_posts_for_comments(
+        self, limit: int = 0, *, include_fetched: bool = False
+    ) -> list[Post]:
+        """Fetch eligible posts for comment collection.
 
         Args:
             limit: Maximum number of posts to fetch (0 for unlimited).
@@ -488,12 +490,25 @@ class Repo:
             A list of Post instances.
         """
         q = select(Post).where(
-            Post.comments_fetched == False,  # noqa: E712
-            Post.status.in_(["ok", "graphed", "enriched", "classified"]),
+            Post.status.in_(
+                ["pending", "ingested", "ok", "graphed", "enriched", "classified", "failed"]
+            )
         )
+        if not include_fetched:
+            q = q.where(Post.comments_fetched == False)  # noqa: E712
         if limit:
             q = q.limit(limit)
         result = await self._session.scalars(q)
+        return list(result.all())
+
+    async def get_posts_needing_comments(self, limit: int = 0) -> list[Post]:
+        """Backward-compatible wrapper for posts that have not been fetched."""
+        return await self.get_posts_for_comments(limit=limit)
+
+    async def get_posts_by_urns(self, urns: list[str]) -> list[Post]:
+        if not urns:
+            return []
+        result = await self._session.scalars(select(Post).where(Post.urn.in_(urns)))
         return list(result.all())
 
     async def bulk_insert_comments(self, post_id: int, comments: list[dict]) -> int:
@@ -514,6 +529,8 @@ class Repo:
                 is_reply=bool(c.get("is_reply", False)),
                 comment_urn=c.get("comment_urn") or None,
                 parent_comment_urn=c.get("parent_comment_urn") or None,
+                kind=c.get("kind"),
+                usefulness_score=float(c.get("usefulness_score") or 0.0),
                 created_at=datetime.now(UTC),
             )
             self._session.add(obj)
@@ -523,6 +540,14 @@ class Repo:
 
     async def delete_comments_for_post(self, post_id: int) -> int:
         """Delete all comments for a post (used by --force re-scrape). Returns count deleted."""
+        # Remove comment-sourced associations first so they can be rebuilt with
+        # the replacement comment IDs. ExternalLink rows remain reusable.
+        await self._session.execute(
+            delete(PostExternalLink).where(
+                PostExternalLink.post_id == post_id,
+                PostExternalLink.context == "comment",
+            )
+        )
         result = await self._session.execute(delete(Comment).where(Comment.post_id == post_id))
         await self._session.flush()
         return result.rowcount  # type: ignore[attr-defined]

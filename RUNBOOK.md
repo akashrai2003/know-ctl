@@ -75,7 +75,11 @@ You can also invoke specific helper tools individually:
 | `sg ingest --live` | Scrape and ingest new LinkedIn saved posts |
 | `sg scrape` | Scrape and ingest new posts with a visible browser window (for 2FA/login) |
 | `sg comments` | Scrape post comments |
+| `sg rank-comments` | Rank stored comments and filter low-signal noise |
 | `sg comment-enrich` | Fetch and summarize external links in comments |
+| `sg insights` | Generate missing or stale multi-source briefings |
+| `sg brief <urn>` | Regenerate one briefing and its Obsidian post note |
+| `sg brief <urn> --fetch-comments` | Refresh one thread before regenerating its briefing |
 | `sg enrich` | Fetch and summarize external links in post bodies |
 | `sg classify` | Classify enriched posts into topics |
 | `sg embed` | Generate local/GPU embeddings for posts |

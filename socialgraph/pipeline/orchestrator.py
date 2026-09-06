@@ -22,11 +22,13 @@ logger = structlog.get_logger(__name__)
 STAGE_ORDER = [
     "ingest",
     "comments",
+    "rank_comments",
     "comment_enrich",
     "enrich",
     "classify",
     "embed",
     "subtopic",
+    "insights",
     "semantic_edges",
     "graph_build",
     "vault_write",

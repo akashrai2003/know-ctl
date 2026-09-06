@@ -114,7 +114,7 @@ def scrape(
                 processed += 1
             await session.commit()
 
-        typer.echo(f"Ingest done: {processed} new, {skipped} already in DB")
+        typer.echo(f"Ingest done: {processed} added/updated, {skipped} unchanged in DB")
 
     run_async(_run, playwright_headless=headless)
 
@@ -236,15 +236,21 @@ def comments(
         "--max-per-post",
         help="Max comments to fetch per post (-1 = use SG_MAX_COMMENTS from env)",
     ),
+    urn: str | None = typer.Option(None, "--urn", help="Fetch comments for a single post URN"),
     headless: bool = typer.Option(True, "--headless/--no-headless"),
 ) -> None:
-    """Scrape LinkedIn comments for saved posts via Voyager API (paginates through 'Load more')."""
+    """Scrape LinkedIn comments. Fetch generously; usefulness ranking happens after."""
     from socialgraph.agents.base import StageContext
     from socialgraph.agents.comment_agent import CommentAgent
 
     async def _run(settings: Any, session: Any) -> None:
         effective_max = max_per_post if max_per_post >= 0 else settings.max_comments
-        agent = CommentAgent(limit=limit, force=force, max_per_post=effective_max)
+        agent = CommentAgent(
+            limit=limit,
+            force=force,
+            max_per_post=effective_max,
+            urns=[urn] if urn else None,
+        )
         ctx = StageContext(run_id="cli-comments", settings=settings, db=session, stage="comments")
         out = await agent.run(ctx)
         typer.echo(
@@ -253,6 +259,105 @@ def comments(
         )
 
     run_async(_run, playwright_headless=headless)
+
+
+def rank_comments() -> None:
+    """Score stored comments and mark applause/promo as noise."""
+    from socialgraph.agents.base import StageContext
+    from socialgraph.agents.comment_rank_agent import CommentRankAgent
+
+    async def _run(settings: Any, session: Any) -> None:
+        has_provider = bool(
+            settings.vllm_base_url or settings.vllm_batch_url or settings.groq_api_key
+        )
+        agent = CommentRankAgent(router=build_router(settings) if has_provider else None)
+        ctx = StageContext(
+            run_id="cli-rank-comments", settings=settings, db=session, stage="rank_comments"
+        )
+        out = await agent.run(ctx)
+        typer.echo(
+            f"Rank comments done: {out.processed} ranked, "
+            f"useful={out.meta.get('useful', 0)} noise={out.meta.get('noise', 0)}"
+        )
+
+    run_async(_run)
+
+
+def insights(
+    limit: int = typer.Option(0, "--limit", "-n", help="Max posts to brief (0 = all missing)"),
+    urn: str | None = typer.Option(None, "--urn", help="Brief a single post URN"),
+    force: bool = typer.Option(False, "--force", help="Regenerate even if insight_json exists"),
+) -> None:
+    """Generate Groq briefings from post + article + useful comments."""
+    from socialgraph.agents.base import StageContext
+    from socialgraph.agents.insight_agent import InsightAgent
+
+    async def _run(settings: Any, session: Any) -> None:
+        router = build_router(settings)
+        agent = InsightAgent(
+            router=router,
+            limit=limit,
+            force=force,
+            urns=[urn] if urn else None,
+        )
+        ctx = StageContext(run_id="cli-insights", settings=settings, db=session, stage="insights")
+        out = await agent.run(ctx)
+        typer.echo(f"Insights done: {out.processed} briefed, {out.failed} failed")
+
+    run_async(_run)
+
+
+def brief(
+    urn: str = typer.Argument(..., help="Post URN to brief and rewrite in the vault"),
+    fetch_comments: bool = typer.Option(
+        False, "--fetch-comments", help="Scrape comments for this URN before briefing"
+    ),
+    headless: bool = typer.Option(True, "--headless/--no-headless"),
+) -> None:
+    """End-to-end briefing for one post: optional comment fetch → Groq insight → vault note."""
+    from socialgraph.agents.base import StageContext
+    from socialgraph.agents.comment_agent import CommentAgent
+    from socialgraph.agents.comment_rank_agent import CommentRankAgent
+    from socialgraph.agents.insight_agent import InsightAgent
+    from socialgraph.agents.vault_write_agent import VaultWriteAgent
+
+    async def _run(settings: Any, session: Any) -> None:
+        ctx_kwargs = {"settings": settings, "db": session}
+        router = build_router(settings)
+        if fetch_comments:
+            comments_agent = CommentAgent(
+                force=True, max_per_post=settings.max_comments, urns=[urn]
+            )
+            out = await comments_agent.run(
+                StageContext(run_id="cli-brief-comments", stage="comments", **ctx_kwargs)
+            )
+            typer.echo(
+                f"Comments: {out.processed} posts, {out.meta.get('total_comments', 0)} fetched"
+            )
+
+        rank_out = await CommentRankAgent(router=router, urns=[urn]).run(
+            StageContext(run_id="cli-brief-rank", stage="rank_comments", **ctx_kwargs)
+        )
+        typer.echo(f"Ranked: {rank_out.processed}")
+
+        insight_out = await InsightAgent(router=router, force=True, urns=[urn]).run(
+            StageContext(run_id="cli-brief-insights", stage="insights", **ctx_kwargs)
+        )
+        typer.echo(f"Insight: {insight_out.processed} briefed, {insight_out.failed} failed")
+        if insight_out.processed != 1:
+            typer.echo(
+                "Could not generate the requested briefing. Check the URN, Groq configuration, "
+                "and logs.",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+        vault_out = await VaultWriteAgent(urns=[urn], rebuild_collections=False).run(
+            StageContext(run_id="cli-brief-vault", stage="vault_write", **ctx_kwargs)
+        )
+        typer.echo(f"Vault: {vault_out.processed} notes")
+
+    run_async(_run, playwright_headless=headless if fetch_comments else None)
 
 
 def embed(

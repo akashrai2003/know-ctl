@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 from collections import Counter
+from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import structlog
@@ -15,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from socialgraph.config.settings import Settings
+from socialgraph.knowledge.comment_rank import USEFUL_KINDS, useful_comments
+from socialgraph.knowledge.insights import parse_insight
 from socialgraph.storage.enums import FetchStatus
 from socialgraph.storage.models import (
     Author,
@@ -56,6 +60,23 @@ async def get_stats(session: AsyncSession) -> dict[str, Any]:
     total_embeddings = (await session.scalar(select(func.count(Embedding.id)))) or 0
     total_external_links = (await session.scalar(select(func.count(ExternalLink.id)))) or 0
     total_comments = (await session.scalar(select(func.count(Comment.id)))) or 0
+    total_briefings = (
+        await session.scalar(select(func.count(Post.id)).where(Post.insight_json.isnot(None)))
+    ) or 0
+    total_useful_comments = (
+        await session.scalar(
+            select(func.count(Comment.id)).where(Comment.kind.in_(tuple(USEFUL_KINDS)))
+        )
+    ) or 0
+    week_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+    useful_comments_last_7_days = (
+        await session.scalar(
+            select(func.count(Comment.id)).where(
+                Comment.kind.in_(tuple(USEFUL_KINDS)),
+                Comment.created_at >= week_cutoff,
+            )
+        )
+    ) or 0
 
     # Top topics
     topic_rows = await session.execute(
@@ -99,6 +120,10 @@ async def get_stats(session: AsyncSession) -> dict[str, Any]:
         "total_embeddings": total_embeddings,
         "total_external_links": total_external_links,
         "total_comments": total_comments,
+        "total_briefings": total_briefings,
+        "briefing_coverage": round(total_briefings / total_posts, 4) if total_posts else 0.0,
+        "total_useful_comments": total_useful_comments,
+        "useful_comments_last_7_days": useful_comments_last_7_days,
         "top_topics": top_topics,
         "top_authors": top_authors,
         "last_pipeline_run": last_run,
@@ -266,6 +291,7 @@ async def list_posts(
             "summary": p.summary,
             "source_url": p.source_url,
             "topics": [pt.topic.name for pt in p.post_topics],
+            "has_briefing": parse_insight(p.insight_json) is not None,
         }
         for p in rows
     ]
@@ -309,14 +335,19 @@ async def get_post_detail(
         if pel.external_link.fetch_status == FetchStatus.OK.value
     ]
 
+    ranked_comments = useful_comments(post.comments, limit=15)
     comments = [
         {
             "author": c.author,
             "text": c.text,
             "has_external_url": c.has_external_url,
+            "kind": c.kind,
+            "usefulness_score": c.usefulness_score,
         }
-        for c in (post.comments or [])[:20]
+        for c in ranked_comments
     ]
+    insight_obj = parse_insight(post.insight_json)
+    insight = asdict(insight_obj) if insight_obj else None
 
     # Similar posts via embeddings
     similar_posts: list[dict] = []
@@ -361,6 +392,15 @@ async def get_post_detail(
         "external_links": ext_links,
         "comments": comments,
         "similar_posts": similar_posts,
+        "insight": insight,
+        "insight_generated_at": (
+            post.insight_generated_at.isoformat() if post.insight_generated_at else None
+        ),
+        "source_coverage": {
+            "articles": sum(1 for pel in post.post_links if pel.context == "body"),
+            "useful_comments": len(ranked_comments),
+            "comment_resources": sum(1 for pel in post.post_links if pel.context == "comment"),
+        },
     }
 
 

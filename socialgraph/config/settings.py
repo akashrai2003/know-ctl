@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     playwright_headless: bool = Field(default=True)
 
     # ── Pipeline knobs ───────────────────────────────────────────────────
-    max_comments: int = Field(default=5, ge=0)
+    max_comments: int = Field(default=80, ge=0)
     log_level: str = Field(default="INFO")
 
     # ── Web UI (M7) ──────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ class Settings(BaseSettings):
             # info.data available after other fields are set
             try:
                 base = info.data["vllm_base_url"]  # type: ignore[union-attr]
-                return f"{base.rstrip('/')}/v1/chat/completions/batch"
+                return f"{base.rstrip('/')}/v1/chat/completions/batch" if base else ""
             except (AttributeError, KeyError):
                 return v
         return v

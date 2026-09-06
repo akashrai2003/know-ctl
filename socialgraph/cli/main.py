@@ -57,8 +57,11 @@ def status() -> None:
     """Show pipeline status (post counts per stage) and scheduler status."""
     settings = _get_settings()
     _configure_logging(settings)
+    from sqlalchemy import func, select
+
     from socialgraph.runner.scheduler import SchedulerDaemon
     from socialgraph.storage.db import build_session_factory, get_session
+    from socialgraph.storage.models import Comment, Post
     from socialgraph.storage.repo import Repo
 
     async def _status():
@@ -66,10 +69,32 @@ def status() -> None:
         async with get_session(factory) as session:
             repo = Repo(session)
             counts = await repo.count_posts_by_status()
+            briefings = (
+                await session.scalar(
+                    select(func.count(Post.id)).where(Post.insight_json.isnot(None))
+                )
+            ) or 0
+            useful_comments = (
+                await session.scalar(
+                    select(func.count(Comment.id)).where(
+                        Comment.kind.in_(("insight", "question", "resource"))
+                    )
+                )
+            ) or 0
+            comments_pending = (
+                await session.scalar(
+                    select(func.count(Post.id)).where(Post.comments_fetched == False)  # noqa: E712
+                )
+            ) or 0
         total = sum(counts.values())
         typer.echo(f"Total posts: {total}")
         for status_val, count in sorted(counts.items()):
             typer.echo(f"  {status_val}: {count}")
+
+        typer.echo("\nKnowledge intelligence:")
+        typer.echo(f"  AI briefings:       {briefings}/{total}")
+        typer.echo(f"  Useful comments:    {useful_comments}")
+        typer.echo(f"  Threads to collect: {comments_pending}")
 
         sched_status = SchedulerDaemon.read_status(settings)
         typer.echo("\n📋 Scheduler:")
@@ -104,11 +129,14 @@ def run(
         help="Run browser headless (no window) when running live. Default: headless.",
     ),
 ) -> None:
-    """Run the complete pipeline (ingest → comments → comment_enrich → enrich → classify → embed → subtopic → semantic_edges → graph_build → vault_write)."""
+    """Run the complete pipeline (ingest → comments → rank → enrich → classify → insights → vault)."""
     settings = _get_settings()
     _configure_logging(settings)
 
-    if not live and not json_file.exists():
+    runs_ingest = only == "ingest" or (
+        only is None and (start_from is None or start_from == "ingest")
+    )
+    if runs_ingest and not live and not json_file.exists():
         typer.echo(
             f"⚠️ JSON file '{json_file}' not found. Falling back to live scraping...", err=True
         )
@@ -126,10 +154,12 @@ def run(
     from socialgraph.agents.classify_agent import ClassifyAgent
     from socialgraph.agents.comment_agent import CommentAgent
     from socialgraph.agents.comment_enrich_agent import CommentEnrichAgent
+    from socialgraph.agents.comment_rank_agent import CommentRankAgent
     from socialgraph.agents.embed_agent import EmbedAgent
     from socialgraph.agents.enrich_agent import EnrichAgent
     from socialgraph.agents.graph_build_agent import GraphBuildAgent
     from socialgraph.agents.ingest_agent import IngestAgent
+    from socialgraph.agents.insight_agent import InsightAgent
     from socialgraph.agents.semantic_edge_agent import SemanticEdgeAgent
     from socialgraph.agents.subtopic_agent import SubtopicAgent
     from socialgraph.agents.vault_write_agent import VaultWriteAgent
@@ -142,6 +172,7 @@ def run(
     agents: dict[str, Agent] = {
         "ingest": IngestAgent(json_path=json_file if not live else None, live_mode=live),
         "comments": CommentAgent(max_per_post=settings.max_comments),
+        "rank_comments": CommentRankAgent(router=router),
         "embed": EmbedAgent(batch_size=settings.batch_size),
         "semantic_edges": SemanticEdgeAgent(),
         "graph_build": GraphBuildAgent(),
@@ -151,6 +182,7 @@ def run(
         agents["comment_enrich"] = CommentEnrichAgent(router=router)
         agents["enrich"] = EnrichAgent(router=router)
         agents["subtopic"] = SubtopicAgent(router=router)
+        agents["insights"] = InsightAgent(router=router)
         if taxonomy:
             agents["classify"] = ClassifyAgent(router, taxonomy)
     orchestrator = PipelineOrchestrator(agents=agents, settings=settings, session_factory=factory)
@@ -177,6 +209,9 @@ app.command(name="vault-write")(pipeline_cmds.vault_write)
 app.command(name="subtopic")(pipeline_cmds.subtopic)
 app.command(name="comment-enrich")(pipeline_cmds.comment_enrich)
 app.command(name="comments")(pipeline_cmds.comments)
+app.command(name="rank-comments")(pipeline_cmds.rank_comments)
+app.command(name="insights")(pipeline_cmds.insights)
+app.command(name="brief")(pipeline_cmds.brief)
 app.command(name="embed")(pipeline_cmds.embed)
 app.command(name="semantic-edges")(pipeline_cmds.semantic_edges)
 

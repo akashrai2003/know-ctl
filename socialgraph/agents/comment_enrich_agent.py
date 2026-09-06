@@ -26,17 +26,18 @@ from typing import TYPE_CHECKING
 import httpx
 import structlog
 from playwright.async_api import Browser, async_playwright
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 
 from socialgraph.agents.base import StageContext, StageOutput
 from socialgraph.agents.enrich_agent import (
+    FETCH_TIMEOUT,
     PW_CONCURRENCY,
     _extract_urls,
     _resolve_and_fetch,
     should_fetch_url,
 )
 from socialgraph.storage.enums import FetchStatus
-from socialgraph.storage.models import Comment, ExternalLink, PostExternalLink
+from socialgraph.storage.models import Comment, ExternalLink, Post, PostExternalLink
 from socialgraph.storage.repo import Repo
 
 if TYPE_CHECKING:
@@ -64,6 +65,7 @@ class CommentEnrichAgent:
         q = select(Comment).where(
             Comment.has_external_url == True,  # noqa: E712
             Comment.urls_enriched == False,  # noqa: E712
+            or_(Comment.kind.is_(None), Comment.kind != "noise"),
         )
         if self._limit:
             q = q.limit(self._limit)
@@ -93,7 +95,7 @@ class CommentEnrichAgent:
             pw_sem = asyncio.Semaphore(PW_CONCURRENCY)
 
             async with httpx.AsyncClient(
-                timeout=15.0,
+                timeout=FETCH_TIMEOUT,
                 headers={
                     "User-Agent": (
                         "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
@@ -130,7 +132,21 @@ class CommentEnrichAgent:
         if self._router and needs_summary:
             log_path = Path(ctx.settings.workspace_dir) / "logs" / "comment_summarization.jsonl"
             await _summarize_comment_links(ctx.db, self._router, needs_summary, log_path)
-            await ctx.db.commit()
+
+        # New resources and summaries change the evidence used by a post briefing.
+        # Invalidate only successfully processed posts; InsightAgent will rebuild them.
+        affected_post_ids = {comment.post_id for comment in comments if comment.urls_enriched}
+        if affected_post_ids:
+            await ctx.db.execute(
+                update(Post)
+                .where(Post.id.in_(affected_post_ids))
+                .values(
+                    insight_json=None,
+                    insight_source_hash=None,
+                    insight_generated_at=None,
+                )
+            )
+        await ctx.db.commit()
 
         logger.info("comment_enrich.complete", processed=processed, failed=failed)
         return StageOutput(

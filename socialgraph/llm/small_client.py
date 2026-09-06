@@ -306,3 +306,48 @@ class HybridLLMClient:
         """Single completion request."""
         results = await self.batch_chat([messages], response_format, temperature)
         return results[0] if results else None
+
+
+class GroqBatchClient:
+    """Async batch-shaped adapter used when no local model server is configured.
+
+    This keeps onboarding honest: Groq-only installations remain functional,
+    while configured local servers are still preferred for high-volume work.
+    """
+
+    def __init__(self, client: Any, concurrency: int = 3) -> None:
+        self._client = client
+        self._concurrency = max(1, concurrency)
+
+    async def batch_chat(
+        self,
+        messages_list: list[list[dict]],
+        response_format: dict | None = None,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+    ) -> list[Any | None]:
+        if not messages_list:
+            return []
+        if max_tokens is not None:
+            logger.debug("llm.groq_adapter_ignores_max_tokens", max_tokens=max_tokens)
+        semaphore = asyncio.Semaphore(self._concurrency)
+
+        async def complete(messages: list[dict]) -> Any | None:
+            async with semaphore:
+                return await asyncio.to_thread(
+                    self._client.complete,
+                    messages,
+                    response_format,
+                    temperature,
+                )
+
+        return list(await asyncio.gather(*(complete(messages) for messages in messages_list)))
+
+    async def single_chat(
+        self,
+        messages: list[dict],
+        response_format: dict | None = None,
+        temperature: float = 0.0,
+    ) -> Any | None:
+        results = await self.batch_chat([messages], response_format, temperature)
+        return results[0] if results else None

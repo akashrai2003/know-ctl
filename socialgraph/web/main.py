@@ -19,6 +19,7 @@ from socialgraph.web import service
 from socialgraph.web.deps import get_db, get_settings, init_globals
 from socialgraph.web.pipeline_runner import get_runner
 from socialgraph.web.schemas import (
+    BriefingRunRequest,
     ConnectionTestResult,
     IsConfiguredOut,
     PipelineRunRequest,
@@ -96,6 +97,74 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not detail:
             return {"error": f"Post '{urn}' not found"}
         return detail
+
+    @app.post("/api/briefings")
+    async def api_generate_briefing(
+        payload: BriefingRunRequest,
+        db: AsyncSession = Depends(get_db),
+        settings: Settings = Depends(get_settings),
+    ):
+        """Regenerate one evidence-backed briefing and its Obsidian post note."""
+        if get_runner().is_running:
+            return {"ok": False, "error": "Wait for the active pipeline run to finish"}
+
+        existing = await service.get_post_detail(db, payload.urn)
+        if not existing:
+            return {"ok": False, "error": f"Post '{payload.urn}' not found"}
+
+        merged_settings = await Settings.from_db(settings.db_path)
+        if not merged_settings.groq_api_key:
+            return {"ok": False, "error": "Configure a Groq API key before generating briefings"}
+
+        from socialgraph.agents.base import StageContext
+        from socialgraph.agents.comment_rank_agent import CommentRankAgent
+        from socialgraph.agents.insight_agent import InsightAgent
+        from socialgraph.agents.vault_write_agent import VaultWriteAgent
+        from socialgraph.llm.factory import build_router
+
+        router = build_router(merged_settings)
+        rank_out = await CommentRankAgent(router=router, urns=[payload.urn]).run(
+            StageContext(
+                run_id="web-briefing-rank",
+                settings=merged_settings,
+                db=db,
+                stage="rank_comments",
+            )
+        )
+        insight_out = await InsightAgent(
+            router=router,
+            force=True,
+            urns=[payload.urn],
+        ).run(
+            StageContext(
+                run_id="web-briefing",
+                settings=merged_settings,
+                db=db,
+                stage="insights",
+            )
+        )
+        if insight_out.processed == 0:
+            return {
+                "ok": False,
+                "error": "The model did not return a valid briefing",
+                "failed": insight_out.failed,
+            }
+
+        vault_out = await VaultWriteAgent(urns=[payload.urn], rebuild_collections=False).run(
+            StageContext(
+                run_id="web-briefing-vault",
+                settings=merged_settings,
+                db=db,
+                stage="vault_write",
+            )
+        )
+        detail = await service.get_post_detail(db, payload.urn)
+        return {
+            "ok": True,
+            "briefing": detail.get("insight") if detail else None,
+            "comments_ranked": rank_out.processed,
+            "vault_written": vault_out.processed == 1,
+        }
 
     @app.get("/api/authors")
     async def api_authors(
@@ -233,7 +302,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         from socialgraph.storage.config_store import ConfigStore
 
         store = ConfigStore(db)
-        base_url = (await store.get("vllm_base_url", "")).rstrip("/")
+        base_url = (await store.get("vllm_base_url", "") or "").rstrip("/")
         if not base_url:
             return ConnectionTestResult(ok=False, message="No vLLM base URL configured")
 

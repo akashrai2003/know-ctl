@@ -8,19 +8,21 @@
 
 ## 1. Product Overview
 
-**social-graph** is a personal knowledge-graph pipeline that ingests LinkedIn saved posts, enriches
-them with external article content and comments, classifies them into a topic taxonomy, builds a
-navigable knowledge graph, and exports everything as an Obsidian vault of Markdown notes.
+**social-graph** is a personal knowledge-intelligence pipeline that ingests LinkedIn saved posts,
+extracts linked article content and discussion threads, filters high-signal community knowledge,
+synthesizes evidence-backed briefings, builds a navigable topic/semantic graph, and exports an
+Obsidian vault of Markdown notes.
 
-The system is driven by a CLI (`sg`) and a pipeline orchestrator that runs five stages in sequence:
+The system is driven by a CLI (`sg`) and a pipeline orchestrator that runs these stages in sequence:
 
 ```
-ingest → enrich → classify → graph_build → vault_write
+ingest → comments → rank_comments → comment_enrich → enrich → classify → embed
+→ subtopic → insights → semantic_edges → graph_build → vault_write
 ```
 
 Data is persisted in a SQLite database (SQLAlchemy ORM, async). LLM tasks use two providers:
-- **vLLM** (self-hosted, OpenAI-compatible) — high-volume batch classification and summarization
-- **Groq** (API) — taxonomy synthesis, subtopic merging, and graph edge inference
+- **vLLM** (self-hosted, OpenAI-compatible) — high-volume summaries, classification, and subtopics
+- **Groq** (API) — taxonomy and multi-source briefing synthesis; fallback when local LLM is absent
 
 ---
 
@@ -62,6 +64,9 @@ Primary entity. Represents one saved LinkedIn post.
 | `comments_fetched` | bool | Whether Playwright comment scraping ran |
 | `title` | str\|None | LLM-generated short title (set by SubtopicAgent) |
 | `summary` | str\|None | LLM-generated summary (set by SubtopicAgent) |
+| `insight_json` | str\|None | Structured briefing synthesized from all available evidence |
+| `insight_source_hash` | str\|None | SHA-256 fingerprint used to detect stale briefings |
+| `insight_generated_at` | datetime\|None | UTC generation time for the current briefing |
 
 ### 3.2 Topic
 Canonical topic in the taxonomy.
@@ -125,6 +130,8 @@ LinkedIn comment on a post.
 | `text` | str | Comment body |
 | `has_external_url` | bool | True if the comment text contains non-LinkedIn URLs |
 | `rank` | int | Position/ordering within thread |
+| `kind` | str\|None | `insight`, `question`, `resource`, or `noise` |
+| `usefulness_score` | float | Information-value score used for ranking and selection |
 
 ### 3.8 GraphNode
 Node in the knowledge graph.
@@ -169,6 +176,20 @@ Audit trail for each pipeline execution.
 
 ## 4. Pipeline Stages
 
+### Comment intelligence (`CommentAgent`, `CommentRankAgent`, `CommentEnrichAgent`)
+
+**Purpose**: Scan a configurable number of comments and replies (80 by default), expand long
+bodies, retain retryability on scrape errors, rank useful claims/questions/resources, and crawl
+links shared by useful commenters.
+
+**Acceptance Criteria**:
+
+- A failed post scrape is omitted from the successful result map and remains `comments_fetched=false`.
+- `--force` preserves existing comments until a replacement scrape succeeds.
+- Comment ranking drops applause and promotional noise while retaining technical claims, numbers,
+  questions, and knowledge URLs.
+- Re-ranked or refreshed evidence invalidates the affected post's cached briefing.
+
 ### Stage 1 — Ingest (`IngestAgent`)
 
 **Purpose**: Load raw posts from a JSON file (LinkedIn export) or Playwright live scrape into the DB.
@@ -203,7 +224,8 @@ Audit trail for each pipeline execution.
 
 ### Stage 3 — Classify (`ClassifyAgent`)
 
-**Purpose**: Assign each enriched post to one or more topics from the taxonomy using vLLM batch classification.
+**Purpose**: Assign each enriched post to one or more topics from the taxonomy using combined post,
+article-summary, and useful-comment context with vLLM batch classification.
 
 **Acceptance Criteria**:
 
@@ -235,7 +257,8 @@ Audit trail for each pipeline execution.
 **Acceptance Criteria**:
 
 - AC-5.1: For each post with `status in ("graphed", "ok")`, a Markdown note is written to `obsidian_vault_path/posts/`.
-- AC-5.2: Each post note includes: URN, author, subtitle, date, content, topic links, external link summaries, and notable comments.
+- AC-5.2: A briefed post note uses fixed knowledge sections: Briefing, From the article,
+  Community insights, Resources, Open questions, and Original post.
 - AC-5.3: `Post.status` is set to `"ok"` after a note is successfully written.
 - AC-5.4: A topic MOC (Map of Content) file is written for each `Topic` to `obsidian_vault_path/topics/`.
 - AC-5.5: An author page is written for each distinct `Post.author` to `obsidian_vault_path/authors/`.
@@ -249,7 +272,7 @@ Audit trail for each pipeline execution.
 
 ## 5. Subtopic Agent (`SubtopicAgent`)
 
-Runs independently (not in the default `sg run` sequence; called via `sg subtopics`).
+Runs in the default pipeline and can also be called independently via `sg subtopic`.
 
 **Purpose**: For each topic, generate an LLM title, 1-sentence summary, and fine-grained subtopic label for every post. Merge overlapping subtopics with a Groq consolidation pass.
 
@@ -304,8 +327,8 @@ All database operations go through `socialgraph.storage.repo.Repo`. Key acceptan
 
 **Acceptance Criteria**:
 
-- AC-9.1: `PipelineOrchestrator.run()` executes stages in the order `["ingest", "enrich", "classify", "graph_build", "vault_write"]`.
-- AC-9.2: When `start_from="classify"`, only stages `["classify", "graph_build", "vault_write"]` are executed.
+- AC-9.1: `PipelineOrchestrator.run()` follows the canonical twelve-stage order documented above.
+- AC-9.2: `start_from` executes that stage and every subsequent registered stage in canonical order.
 - AC-9.3: When `only_stage="enrich"`, only the `enrich` stage is executed.
 - AC-9.4: An invalid `start_from` or `only_stage` value raises `ValueError`.
 - AC-9.5: When `dry_run=True`, no agents are called and `PipelineResult.status = "dry_run"`.
@@ -354,15 +377,20 @@ All database operations go through `socialgraph.storage.repo.Repo`. Key acceptan
 | Command | Description |
 |---------|-------------|
 | `sg ingest --json <file>` | Import posts from a JSON file |
-| `sg enrich` | Enrich all pending posts (fetch URLs, scrape comments) |
+| `sg comments` | Collect comments and nested replies (default scan cap: 80) |
+| `sg rank-comments` | Rank useful community claims and filter noise |
+| `sg comment-enrich` | Fetch and summarize useful comment-shared links |
+| `sg enrich` | Fetch and summarize links in post bodies |
 | `sg classify` | Classify posts into topics |
+| `sg insights` | Generate missing or stale evidence-backed briefings |
+| `sg brief <urn>` | Regenerate one briefing and its post note |
 | `sg build-graph` | Build graph nodes and edges |
 | `sg vault-write` | Render Obsidian vault |
-| `sg run` | Full pipeline (all 5 stages) |
+| `sg run` | Full intelligence pipeline |
 | `sg run --from <stage>` | Resume pipeline from a given stage |
 | `sg run --dry-run` | Preview without executing |
 | `sg status` | Show counts per pipeline status |
-| `sg subtopics` | Run subtopic + title generation |
+| `sg subtopic` | Run subtopic + title generation |
 
 ---
 

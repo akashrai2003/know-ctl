@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from socialgraph.storage.enums import ConfidenceTag, FetchStatus, PipelineStage, PostStatus
+from socialgraph.storage.enums import (
+    CommentKind,
+    ConfidenceTag,
+    FetchStatus,
+    PipelineStage,
+    PostStatus,
+)
 
 
 def test_enum_values() -> None:
@@ -17,7 +23,12 @@ def test_enum_values() -> None:
 
     # PipelineStage
     assert PipelineStage.INGEST.value == "ingest"
+    assert PipelineStage.RANK_COMMENTS.value == "rank_comments"
+    assert PipelineStage.INSIGHTS.value == "insights"
     assert PipelineStage.VAULT_WRITE.value == "vault_write"
+
+    assert CommentKind.INSIGHT.value == "insight"
+    assert CommentKind.NOISE.value == "noise"
 
     # ConfidenceTag
     assert ConfidenceTag.EXTRACTED.value == "EXTRACTED"
