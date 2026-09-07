@@ -19,6 +19,7 @@ from socialgraph.knowledge.obsidian import (
     render_author_note,
     render_index,
     render_post_note,
+    render_recent_posts,
     render_subtopic_note,
     render_topic_note,
 )
@@ -340,12 +341,39 @@ class VaultWriteAgent:
                         error=str(exc),
                     )
 
-        # Write index
+        # Write a combined newest-first timeline for each platform.
+        recent_platforms: list[str] = []
+        for platform_name in sorted({post.platform for post in posts}):
+            platform_entries = [
+                {
+                    "urn": post.urn,
+                    "author": post.author,
+                    "date_raw": post.date_raw,
+                    "title": post.title,
+                    "content": post.content,
+                    "created_at": post.created_at,
+                    "primary_topic": _primary_topic(post),
+                }
+                for post in posts
+                if post.platform == platform_name
+            ]
+            writer.write_recent(
+                render_recent_posts(
+                    platform_entries,
+                    generated_at=datetime.now(UTC),
+                    platform=platform_name,
+                ),
+                platform=platform_name,
+            )
+            recent_platforms.append(platform_name)
+
+        # Write root index
         writer.write_index(
             render_index(
                 topic_names=list(topic_subtopic_posts.keys()),
                 total_posts=processed,
                 generated_at=datetime.now(UTC),
+                recent_platforms=recent_platforms,
             )
         )
 

@@ -92,3 +92,55 @@ async def test_graph_build_agent_run(db_session: AsyncSession, test_settings) ->
     assert len(edges) == 1
     assert edges[0].relation == "conceptually_related_to"
     assert edges[0].confidence_score == 0.9
+
+
+@pytest.mark.asyncio
+async def test_graph_build_replaces_stale_classification_edges(
+    db_session: AsyncSession, test_settings
+) -> None:
+    post = Post(
+        urn="urn:li:activity:2002",
+        platform="linkedin",
+        author="Alice",
+        content="CUDA inference",
+        status=PostStatus.CLASSIFIED.value,
+    )
+    current = Topic(name="AI Infrastructure")
+    stale = Topic(name="AI Agents")
+    db_session.add_all([post, current, stale])
+    await db_session.flush()
+    db_session.add(PostTopic(post_id=post.id, topic_id=current.id, confidence_score=0.95))
+    post_node = GraphNode(node_id="post_2002", node_type="post", label="Alice")
+    stale_node = GraphNode(node_id="ai_agents", node_type="topic", label="AI Agents")
+    db_session.add_all([post_node, stale_node])
+    await db_session.flush()
+    db_session.add(
+        GraphEdge(
+            source_node_id=post_node.id,
+            target_node_id=stale_node.id,
+            relation="conceptually_related_to",
+        )
+    )
+    await db_session.commit()
+
+    await GraphBuildAgent().run(
+        StageContext("test", test_settings, db_session, "graph_build")
+    )
+
+    current_node = await db_session.scalar(
+        select(GraphNode).where(GraphNode.node_id == "ai_infrastructure")
+    )
+    edges = list(
+        (
+            await db_session.execute(
+                select(GraphNode.node_id)
+                .join(GraphEdge, GraphEdge.target_node_id == GraphNode.id)
+                .where(
+                    GraphEdge.source_node_id == post_node.id,
+                    GraphEdge.relation == "conceptually_related_to",
+                )
+            )
+        ).scalars()
+    )
+    assert current_node is not None
+    assert edges == ["ai_infrastructure"]

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -54,8 +54,35 @@ def _clean_date(date_raw: str | None) -> str:
     """Strip LinkedIn suffix (' •  ' etc.) from date_raw and return a clean display string."""
     if not date_raw:
         return ""
+    relative = re.findall(r"(?<!\w)\d+\s*(?:s|m|h|d|w|mo|y)(?!\w)", date_raw, re.I)
+    if relative:
+        return relative[-1].replace(" ", "")
     cleaned = date_raw.split("•")[0].strip()
     return cleaned
+
+
+def _activity_datetime(urn: str, fallback: datetime | None = None) -> datetime | None:
+    """Decode a LinkedIn activity ID timestamp, falling back to first-seen time."""
+    try:
+        millis = int(_urn_tail(urn)) >> 22
+        published = datetime.fromtimestamp(millis / 1000, timezone.utc)
+        if 2000 <= published.year <= 2100:
+            return published
+    except (OverflowError, OSError, ValueError):
+        pass
+    if fallback is not None:
+        return fallback.replace(tzinfo=fallback.tzinfo or timezone.utc)
+    return None
+
+
+def _sorted_post_entries(entries: list[dict]) -> list[dict]:
+    minimum = datetime.min.replace(tzinfo=timezone.utc)
+    return sorted(
+        entries,
+        key=lambda entry: _activity_datetime(entry.get("urn", ""), entry.get("created_at"))
+        or minimum,
+        reverse=True,
+    )
 
 
 _URL_RE = re.compile(r"https?://[^\s\]\[\"'<>]+")
@@ -312,7 +339,7 @@ def render_subtopic_note(
     """
     total = len(entries)
     lines: list[str] = []
-    for p in entries:
+    for p in _sorted_post_entries(entries):
         date_str = _clean_date(p.get("date_raw"))
         date_prefix = f"({date_str}) " if date_str else ""
         post_title = p.get("title") or p.get("content", "")[:80].strip()
@@ -354,21 +381,20 @@ def render_topic_note(
 
     ``subtopic_groups`` maps subtopic_name → list of post entry dicts, each with:
     ``urn``, ``author``, ``date_raw``, ``title``, ``content``.
-    Named subtopics are listed as plain text (no wikilinks) so the global graph
-    shows only the post→subtopic→topic hierarchy via subtopic back-references —
-    not an additional topic→subtopic forward edge.
+    Named subtopics are linked to their generated notes for direct navigation.
     The empty-string key ``""`` lists posts that have no subtopic directly.
     """
     slug = topic_slug or _slug(name)
     total = sum(len(v) for v in subtopic_groups.values())
 
-    # Subtopics section — plain text (no wikilinks) to avoid creating topic→subtopic
-    # graph edges. The subtopic→topic edge via parent_topic is enough for the hierarchy.
     subtopic_lines: list[str] = []
     direct_entries: list[dict] = []
     for subtopic_name, entries in sorted(subtopic_groups.items()):
         if subtopic_name:
-            subtopic_lines.append(f"- {subtopic_name} — {len(entries)} posts")
+            subtopic_file = f"{slug}__{_slug(subtopic_name)}"
+            subtopic_lines.append(
+                f"- [[{subtopic_file}|{subtopic_name}]] — {len(entries)} posts"
+            )
         else:
             direct_entries = entries  # posts with no subtopic
 
@@ -376,7 +402,7 @@ def render_topic_note(
 
     # Direct posts (no subtopic) listed inline
     direct_lines: list[str] = []
-    for p in direct_entries:
+    for p in _sorted_post_entries(direct_entries):
         date_str = _clean_date(p.get("date_raw"))
         date_prefix = f"({date_str}) " if date_str else ""
         post_title = p.get("title") or p.get("content", "")[:80].strip()
@@ -418,8 +444,14 @@ def render_index(
     topic_names: list[str],
     total_posts: int,
     generated_at: datetime,
+    recent_platforms: list[str] | None = None,
 ) -> str:
     topic_links = "\n".join(f"- [[{_slug(t)}|{t}]]" for t in sorted(topic_names))
+    recent_links = "\n".join(
+        f"- [[{platform.lower()}/recent|{platform.title()} — newest first]]"
+        for platform in sorted(recent_platforms or [])
+    )
+    recent_section = f"## Recent Posts\n\n{recent_links}\n\n" if recent_links else ""
     return f"""\
 # Social Graph Index
 
@@ -427,9 +459,60 @@ Generated: {generated_at.strftime("%Y-%m-%d %H:%M")}
 Total posts: {total_posts}
 Topics: {len(topic_names)}
 
-## Topics
+{recent_section}## Topics
 
 {topic_links}
+"""
+
+
+def render_recent_posts(
+    entries: list[dict],
+    generated_at: datetime,
+    platform: str = "linkedin",
+) -> str:
+    """Render every post as a one-line, newest-first publication timeline."""
+    sections: list[str] = []
+    date_lines: list[str] = []
+    current_date = ""
+    for entry in _sorted_post_entries(entries):
+        published = _activity_datetime(entry.get("urn", ""), entry.get("created_at"))
+        date_label = published.strftime("%Y-%m-%d") if published else "Unknown date"
+        if date_label != current_date:
+            if date_lines:
+                sections.append(f"## {current_date}\n\n" + "\n".join(date_lines))
+            date_lines = []
+            current_date = date_label
+
+        title = entry.get("title") or entry.get("content", "")[:100].strip() or "Untitled post"
+        title = _escape_wikilinks(str(title).replace("\n", ". ").strip())
+        author = _escape_wikilinks(str(entry.get("author") or "Unknown"))
+        post_tail = _urn_tail(entry["urn"])
+        topic = entry.get("primary_topic")
+        topic_suffix = f" · [[{_slug(topic)}|{topic}]]" if topic else ""
+        age = _clean_date(entry.get("date_raw"))
+        age_prefix = f"({age} at last sync) " if age else ""
+        date_lines.append(f"- {age_prefix}[[post_{post_tail}|{title}]] — {author}{topic_suffix}")
+
+    if date_lines:
+        sections.append(f"## {current_date}\n\n" + "\n".join(date_lines))
+
+    timeline = "\n\n".join(sections) if sections else "_(none)_"
+    return f"""\
+---
+type: timeline
+platform: "{_yaml_str(platform)}"
+post_count: {len(entries)}
+tags: [timeline, {_slug(platform)}]
+---
+
+# {platform.title()} Posts — Newest First
+
+Generated: {generated_at.strftime("%Y-%m-%d %H:%M")}
+
+> One-line index of every post, grouped by publication date. LinkedIn dates are
+> decoded from activity IDs; relative ages show what was captured at the last sync.
+
+{timeline}
 """
 
 
@@ -572,6 +655,12 @@ class VaultWriter:
 
     def write_index(self, content: str) -> Path:
         path = self._vault / "_index.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        return path
+
+    def write_recent(self, content: str, platform: str = "linkedin") -> Path:
+        path = self._platform_dir(platform) / "recent.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
         return path

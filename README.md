@@ -31,7 +31,7 @@ The project includes a web application with an onboarding wizard, interactive se
 - **Deep URL and Comment Enrichment**: Crawls links from both posts and useful comments with `trafilatura`, then summarizes the extracted article text.
 - **Freshness-Aware Briefings**: Evidence hashes automatically invalidate a briefing when its post, article, or useful thread context changes.
 - **Local Vector Embeddings**: Generates embeddings locally using `sentence-transformers` with vectorized matrix similarity calculations.
-- **Obsidian Vault Synthesis**: Writes clean Markdown files with YAML frontmatter, bidirectional wikilinks (`[[post_...]]`), topic Maps of Content (MOCs), and author profiles.
+- **Obsidian Vault Synthesis**: Writes clean Markdown files with YAML frontmatter, bidirectional wikilinks (`[[post_...]]`), clickable topic/subtopic Maps of Content (MOCs), author profiles, and a combined newest-first post timeline.
 - **Model Context Protocol (MCP)**: Query structured briefings directly with `get_briefing`, alongside semantic search, topic, author, graph, and timeline tools.
 
 ---
@@ -170,8 +170,10 @@ sg rank-comments                 # Score comments and remove applause/promo nois
 sg enrich                        # Crawl and summarize linked URLs
 sg comment-enrich                # Fetch and summarize links inside comments
 sg classify                      # Categorize posts according to topic taxonomy
+sg classify --force --local-model <served-model-id>  # Safely replace all classifications
 sg embed                         # Compute vector embeddings for all posts
 sg subtopic                      # Detect granular subtopics per category
+sg subtopic --force --local-model <served-model-id>  # Rebuild primary-topic hierarchy
 sg insights                      # Generate missing/stale evidence-backed briefings
 sg insights --provider local     # Generate briefings entirely with the local model
 sg insights --provider local --local-model <served-model-id>  # Select Gemma/Qwen per run

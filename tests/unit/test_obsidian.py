@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from socialgraph.knowledge.obsidian import render_author_note, render_post_note, render_topic_note
+from socialgraph.knowledge.obsidian import (
+    render_author_note,
+    render_post_note,
+    render_recent_posts,
+    render_topic_note,
+)
 
 
 def test_post_note_contains_urn():
@@ -82,6 +87,46 @@ def test_topic_note_post_count():
         related_topics=[],
     )
     assert "5 posts" in content
+
+
+def test_topic_note_links_to_subtopic_note():
+    content = render_topic_note(
+        name="AI Infrastructure",
+        description="Serving systems",
+        subtopic_groups={
+            "GPU Optimization": [
+                {"urn": "urn:li:activity:7501683033209516033", "content": "CUDA"}
+            ]
+        },
+        related_topics=[],
+    )
+    assert "[[ai_infrastructure__gpu_optimization|GPU Optimization]] — 1 posts" in content
+
+
+def test_recent_posts_are_grouped_by_decoded_publication_date_newest_first():
+    content = render_recent_posts(
+        [
+            {
+                "urn": "urn:li:activity:7499856654121795584",
+                "author": "Older Author",
+                "title": "Older inference post",
+                "date_raw": "5d •  ",
+                "primary_topic": "Large Language Models",
+            },
+            {
+                "urn": "urn:li:activity:7501683033209516033",
+                "author": "Newest Author",
+                "title": "Newest model post",
+                "date_raw": "Reposted from Someone • 15h •  ",
+                "primary_topic": "Model Optimization",
+            },
+        ],
+        generated_at=datetime(2026, 9, 7),
+    )
+    assert "## 2026-09-04" in content
+    assert "(15h at last sync)" in content
+    assert "[[model_optimization|Model Optimization]]" in content
+    assert content.index("Newest model post") < content.index("Older inference post")
 
 
 def test_render_author_note():

@@ -81,5 +81,8 @@ class Taxonomy:
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     def as_prompt_list(self) -> str:
-        """Format topics for LLM prompt — names only, no descriptions."""
-        return "\n".join(f"- {t.name}" for t in self._topics)
+        """Format canonical topic names with the distinctions the classifier needs."""
+        return "\n".join(
+            f"- {t.name}: {t.description}" if t.description else f"- {t.name}"
+            for t in self._topics
+        )

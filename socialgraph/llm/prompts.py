@@ -5,7 +5,9 @@ from __future__ import annotations
 CLASSIFY_POST_TOPICS_SYSTEM = """\
 You are a topic classifier for a professional AI/tech knowledge base.
 You receive the post, any linked article, and notable discussion comments.
-Assign topics using the full context, not just the post's first paragraph.
+Identify the material's central technical subject, not merely the product, audience,
+or workflow that happens to use it. Assign one primary topic and up to two genuinely
+useful secondary topics using the full context.
 Respond with valid JSON only. No explanation."""
 
 CLASSIFY_POST_TOPICS_USER = """\
@@ -17,16 +19,34 @@ Context:
 
 Respond with JSON:
 {{
-  "topics": ["Topic1", "Topic2"],
+  "primary_topic": "Topic1",
+  "secondary_topics": ["Topic2"],
   "confidence": 0.85
 }}
 
 Rules:
-- Assign 1-3 topics max
-- Use ONLY the exact topic names from the list above (do not include descriptions)
+- Return exactly one primary_topic and 0-2 secondary_topics.
+- Use ONLY exact topic names from the list above; descriptions explain boundaries and
+  are not part of a topic name.
+- primary_topic is the technical center of gravity. Secondary topics provide useful
+  cross-cutting context, not every concept mentioned.
 - Weigh the linked article and technical comments as much as the post text
+- Prefer a specific technical domain over generic Artificial Intelligence, research,
+  education, or open-source labels.
+- AI Agents & Automation is primary only when autonomous planning, tool use, agent
+  orchestration, multi-agent coordination, or workflow automation is the central subject.
+  An inference system, CUDA kernel, model-training method, or knowledge resource does
+  NOT become an agent post merely because an agent uses it.
+- KV cache, inference latency/throughput, vLLM, TensorRT, CUDA/Triton kernels, GPU memory,
+  distributed serving, schedulers, and production inference are primarily AI Infrastructure.
+- Quantization, pruning, distillation, fine-tuning, LoRA/QLoRA, and model compression are
+  primarily Model Optimization unless the central problem is serving infrastructure.
+- RLHF, GRPO, PPO, DPO, rewards, and policy learning are primarily Reinforcement Learning
+  when the learning algorithm or comparison is the central subject.
+- Open Source AI, Learning & Education, and AI Research and Development should normally be
+  secondary when a more specific technical subject exists.
 - confidence: 0.0–1.0 reflecting how clearly the material fits the chosen topics
-- If nothing fits, return {{"topics": [], "confidence": 0.1}}
+- If nothing fits, return {{"primary_topic": "Artificial Intelligence", "secondary_topics": [], "confidence": 0.2}}
 """
 
 EXTRACT_RAW_TOPICS_SYSTEM = """\

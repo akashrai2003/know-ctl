@@ -134,7 +134,19 @@ def enrich() -> None:
     run_async(_run)
 
 
-def classify() -> None:
+def classify(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Reclassify every eligible post, replacing old topic/subtopic assignments safely.",
+    ),
+    urn: str | None = typer.Option(None, "--urn", help="Reclassify one post URN."),
+    local_model: str | None = typer.Option(
+        None,
+        "--local-model",
+        help="Override SG_VLLM_MODEL (the model must already be loaded by the server).",
+    ),
+) -> None:
     """Classify enriched posts into topics."""
     from socialgraph.agents.base import StageContext
     from socialgraph.agents.classify_agent import ClassifyAgent
@@ -142,12 +154,18 @@ def classify() -> None:
     async def _run(settings: Any, session: Any) -> None:
         taxonomy = get_taxonomy(settings)
         router = build_router(settings)
-        agent = ClassifyAgent(router, taxonomy)
+        agent = ClassifyAgent(
+            router,
+            taxonomy,
+            force=force,
+            urns=[urn] if urn else None,
+            fallback_to_groq=local_model is None,
+        )
         ctx = StageContext(run_id="cli-classify", settings=settings, db=session, stage="classify")
         out = await agent.run(ctx)
         typer.echo(f"Classify done: {out.processed} classified, {out.failed} failed")
 
-    run_async(_run)
+    run_async(_run, vllm_model=local_model)
 
 
 def build_graph() -> None:
@@ -179,8 +197,18 @@ def vault_write() -> None:
 
 
 def subtopic(
-    _force: bool = typer.Option(
+    force: bool = typer.Option(
         False, "--force", help="Re-generate titles/subtopics even if already set"
+    ),
+    local_model: str | None = typer.Option(
+        None,
+        "--local-model",
+        help="Override SG_VLLM_MODEL (the model must already be loaded by the server).",
+    ),
+    topic: str | None = typer.Option(
+        None,
+        "--topic",
+        help="Regenerate only posts whose primary topic exactly matches this name.",
     ),
 ) -> None:
     """Generate LLM titles and subtopics for all classified posts."""
@@ -189,12 +217,12 @@ def subtopic(
 
     async def _run(settings: Any, session: Any) -> None:
         router = build_router(settings)
-        agent = SubtopicAgent(router)
+        agent = SubtopicAgent(router, force=force, topic_names=[topic] if topic else None)
         ctx = StageContext(run_id="cli-subtopic", settings=settings, db=session, stage="subtopic")
         out = await agent.run(ctx)
         typer.echo(f"Subtopic done: {out.processed} processed, {out.failed} failed")
 
-    run_async(_run)
+    run_async(_run, vllm_model=local_model)
 
 
 def comment_enrich(

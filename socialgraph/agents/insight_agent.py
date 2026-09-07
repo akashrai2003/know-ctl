@@ -23,7 +23,8 @@ from socialgraph.storage.models import Post, PostExternalLink
 logger = structlog.get_logger(__name__)
 
 UTC = timezone.utc
-INSIGHT_VERSION = 1
+INSIGHT_VERSION = 2
+LEGACY_INSIGHT_VERSION = 1
 LOCAL_INSIGHT_MAX_TOKENS = 1200
 LOCAL_INSIGHT_RETRY_MAX_TOKENS = 1800
 LOCAL_INSIGHT_RETRY_BATCH_SIZE = 4
@@ -85,24 +86,41 @@ class InsightAgent:
         posts = list(result.all())
 
         candidates: list[tuple[Post, dict[str, str], str]] = []
-        cached = 0
+        cached = migrated = 0
         for post in posts:
             payload = _build_prompt_payload(post, self._comment_limit)
             source_hash = _source_hash(payload)
             existing_is_valid = parse_insight(post.insight_json) is not None
-            if not self._force and existing_is_valid and post.insight_source_hash == source_hash:
-                cached += 1
-                continue
+            if not self._force and existing_is_valid:
+                if post.insight_source_hash == source_hash:
+                    cached += 1
+                    continue
+                legacy_hash = _source_hash(
+                    payload,
+                    version=LEGACY_INSIGHT_VERSION,
+                    include_generated_title=True,
+                )
+                if post.insight_source_hash == legacy_hash:
+                    post.insight_source_hash = source_hash
+                    cached += 1
+                    migrated += 1
+                    continue
             candidates.append((post, payload, source_hash))
 
         if self._limit:
             candidates = candidates[: self._limit]
 
         if not candidates:
+            if migrated:
+                await ctx.db.commit()
             return StageOutput(
                 stage=self.name,
                 skipped=max(cached, 1),
-                meta={"reason": "no posts need insights", "cached": cached},
+                meta={
+                    "reason": "no posts need insights",
+                    "cached": cached,
+                    "migrated_hashes": migrated,
+                },
             )
 
         logger.info(
@@ -307,10 +325,20 @@ def _build_prompt_payload(post: Post, comment_limit: int) -> dict[str, str]:
     }
 
 
-def _source_hash(payload: dict[str, str]) -> str:
-    """Hash every source used by the briefing so stale insights self-invalidate."""
+def _source_hash(
+    payload: dict[str, str],
+    *,
+    version: int = INSIGHT_VERSION,
+    include_generated_title: bool = False,
+) -> str:
+    """Hash source evidence while excluding mutable, AI-generated display titles."""
+    hash_payload = (
+        payload
+        if include_generated_title
+        else {key: value for key, value in payload.items() if key != "title"}
+    )
     canonical = json.dumps(
-        {"version": INSIGHT_VERSION, "payload": payload},
+        {"version": version, "payload": hash_payload},
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),

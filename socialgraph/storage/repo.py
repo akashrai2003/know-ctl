@@ -211,6 +211,17 @@ class Repo:
         await self._session.flush()
         return pt
 
+    async def clear_post_taxonomy(self, post_id: int) -> None:
+        """Remove topic and subtopic assignments before a validated replacement."""
+        await self._session.execute(delete(PostSubtopic).where(PostSubtopic.post_id == post_id))
+        await self._session.execute(delete(PostTopic).where(PostTopic.post_id == post_id))
+        await self._session.flush()
+
+    async def clear_post_subtopics(self, post_id: int) -> None:
+        """Remove subtopic assignments while retaining the post's topic classification."""
+        await self._session.execute(delete(PostSubtopic).where(PostSubtopic.post_id == post_id))
+        await self._session.flush()
+
     # ── PostSubtopic ──────────────────────────────────────────────────────
 
     async def upsert_post_subtopic(

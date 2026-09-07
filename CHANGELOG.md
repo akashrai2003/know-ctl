@@ -15,12 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard briefing coverage, community-intelligence metrics, structured briefing views, and one-click regeneration.
 - MCP `get_briefing` tool for structured AI-agent retrieval.
 - Local-only, batched briefing generation with `sg insights --provider local` or `sg run --insights-provider local`.
+- A newest-first, date-grouped Obsidian post timeline and clickable topic-to-subtopic navigation.
+- Safe force-reclassification and force-subtopic CLI modes with resumable local-model batches.
 
 ### Fixed
 - Comment-scrape failures remain retryable instead of being recorded as successful empty threads.
 - Forced comment refreshes no longer delete existing comments before a replacement scrape succeeds.
 - Web pipeline result serialization now handles stage outputs correctly.
 - Groq-only installations can run batch-shaped small-model tasks when no local server is configured.
+- Primary topics now preserve model priority instead of using alphabetical tie-breaking; agent mentions no longer override central inference, GPU, CUDA, optimization, or reinforcement-learning subjects.
+- Force-reclassification removes stale taxonomy and graph edges only after a valid replacement is available.
 
 ## [0.1.0] - 2026-06-16
 

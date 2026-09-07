@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from socialgraph.agents.base import StageContext, StageOutput
 from socialgraph.knowledge.graph import GraphBuilder
 from socialgraph.knowledge.obsidian import _slug, _urn_tail
 from socialgraph.storage.enums import PostStatus
-from socialgraph.storage.models import GraphNode, Post, PostTopic, Topic
+from socialgraph.storage.models import GraphEdge, GraphNode, Post, PostTopic, Topic
 from socialgraph.storage.repo import Repo
 
 logger = structlog.get_logger(__name__)
@@ -48,6 +48,15 @@ class GraphBuildAgent:
 
             db_node = await repo.upsert_graph_node(
                 node_id=post_node_id, node_type="post", label=post.author or "Unknown"
+            )
+
+            # A force-reclassification replaces topic assignments. Remove the cached
+            # classification edges before recreating them so old topics cannot linger.
+            await ctx.db.execute(
+                delete(GraphEdge).where(
+                    GraphEdge.source_node_id == db_node.id,
+                    GraphEdge.relation == "conceptually_related_to",
+                )
             )
 
             for pt in post.post_topics:

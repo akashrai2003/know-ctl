@@ -9,7 +9,12 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from socialgraph.agents.base import StageContext
-from socialgraph.agents.insight_agent import InsightAgent
+from socialgraph.agents.insight_agent import (
+    LEGACY_INSIGHT_VERSION,
+    InsightAgent,
+    _build_prompt_payload,
+    _source_hash,
+)
 from socialgraph.knowledge.insights import parse_insight
 from socialgraph.knowledge.obsidian import render_post_note
 from socialgraph.llm.large_client import GroqClient
@@ -209,6 +214,46 @@ async def test_local_insights_retry_malformed_outputs(db_session: AsyncSession, 
 def test_insight_agent_rejects_unknown_provider():
     with pytest.raises(ValueError, match="provider"):
         InsightAgent(MagicMock(spec=LLMRouter), provider="unknown")
+
+
+@pytest.mark.asyncio
+async def test_insight_agent_migrates_legacy_title_sensitive_hash_without_llm(
+    db_session: AsyncSession, test_settings
+):
+    post = Post(
+        urn="urn:li:activity:briefing-hash-migration",
+        platform="linkedin",
+        author="Author",
+        title="Mutable generated title",
+        content="Stable original evidence.",
+        status="ok",
+        insight_json=(
+            '{"thesis":"Existing briefing.","article_takeaways":[],'
+            '"community_insights":[],"resources":[],"open_questions":[]}'
+        ),
+        post_links=[],
+        comments=[],
+    )
+    db_session.add(post)
+    await db_session.flush()
+    payload = _build_prompt_payload(post, 12)
+    post.insight_source_hash = _source_hash(
+        payload,
+        version=LEGACY_INSIGHT_VERSION,
+        include_generated_title=True,
+    )
+    await db_session.commit()
+
+    batch = MagicMock(spec=BatchLLMClient)
+    batch.batch_chat = AsyncMock()
+    output = await InsightAgent(LLMRouter(batch, None), provider="local").run(
+        StageContext("test", test_settings, db_session, "insights")
+    )
+
+    assert output.processed == 0
+    assert output.meta["migrated_hashes"] == 1
+    assert post.insight_source_hash == _source_hash(payload)
+    batch.batch_chat.assert_not_awaited()
 
 
 def test_post_note_uses_briefing_and_article_summary():

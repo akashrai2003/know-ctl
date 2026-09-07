@@ -138,6 +138,16 @@ def run(
         "--local-model",
         help="Override SG_VLLM_MODEL for this run (the model must be loaded by the server).",
     ),
+    force_classify: bool = typer.Option(
+        False,
+        "--force-classify",
+        help="Reclassify all eligible posts and safely replace old taxonomy assignments.",
+    ),
+    force_subtopics: bool = typer.Option(
+        False,
+        "--force-subtopics",
+        help="Regenerate titles and primary-topic subtopics for all eligible posts.",
+    ),
 ) -> None:
     """Run the complete pipeline (ingest → comments → rank → enrich → classify → insights → vault)."""
     settings = _get_settings()
@@ -193,10 +203,15 @@ def run(
     if router:
         agents["comment_enrich"] = CommentEnrichAgent(router=router)
         agents["enrich"] = EnrichAgent(router=router)
-        agents["subtopic"] = SubtopicAgent(router=router)
+        agents["subtopic"] = SubtopicAgent(router=router, force=force_subtopics)
         agents["insights"] = InsightAgent(router=router, provider=insights_provider)
         if taxonomy:
-            agents["classify"] = ClassifyAgent(router, taxonomy)
+            agents["classify"] = ClassifyAgent(
+                router,
+                taxonomy,
+                force=force_classify,
+                fallback_to_groq=local_model is None,
+            )
     orchestrator = PipelineOrchestrator(agents=agents, settings=settings, session_factory=factory)
 
     async def _run():

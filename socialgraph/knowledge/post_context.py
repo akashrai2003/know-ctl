@@ -15,7 +15,17 @@ def build_post_context(
     comment_limit: int = 5,
 ) -> str:
     """Build a multi-source context string for classification, titles, and insights."""
-    parts: list[str] = [f"Post:\n{(getattr(post, 'content', None) or '')[:1600]}"]
+    parts: list[str] = []
+
+    title = (getattr(post, "title", None) or "").strip()
+    if title:
+        parts.append(f"Existing knowledge title:\n{title[:300]}")
+
+    summary = (getattr(post, "summary", None) or "").strip()
+    if summary:
+        parts.append(f"Existing evidence summary:\n{summary[:900]}")
+
+    parts.append(f"Original post:\n{(getattr(post, 'content', None) or '')[:1800]}")
 
     for pel in getattr(post, "post_links", None) or []:
         if getattr(pel, "context", "body") != "body":
