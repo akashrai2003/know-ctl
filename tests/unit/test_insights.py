@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -127,6 +127,88 @@ async def test_insight_agent_caches_by_evidence_hash(db_session: AsyncSession, t
     third = await agent.run(ctx)
     assert third.processed == 1
     assert groq.complete.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_insight_agent_can_use_local_provider_only(db_session: AsyncSession, test_settings):
+    post = Post(
+        urn="urn:li:activity:local-briefing",
+        platform="linkedin",
+        author="Local Author",
+        content="A local model can synthesize this evidence.",
+        status="ok",
+    )
+    db_session.add(post)
+    await db_session.commit()
+
+    batch = MagicMock(spec=BatchLLMClient)
+    batch.batch_chat = AsyncMock(
+        return_value=[
+            {
+                "thesis": "The briefing was synthesized locally.",
+                "article_takeaways": [],
+                "community_insights": [],
+                "resources": [],
+                "open_questions": [],
+            }
+        ]
+    )
+    groq = MagicMock(spec=GroqClient)
+    output = await InsightAgent(LLMRouter(batch, groq), provider="local").run(
+        StageContext("test", test_settings, db_session, "insights")
+    )
+
+    assert output.processed == 1
+    assert output.failed == 0
+    assert output.meta["provider"] == "local"
+    assert parse_insight(post.insight_json).thesis == "The briefing was synthesized locally."
+    batch.batch_chat.assert_awaited_once()
+    groq.complete.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_local_insights_retry_malformed_outputs(db_session: AsyncSession, test_settings):
+    post = Post(
+        urn="urn:li:activity:local-briefing-retry",
+        platform="linkedin",
+        author="Local Author",
+        content="A local model may occasionally return truncated JSON.",
+        status="ok",
+    )
+    db_session.add(post)
+    await db_session.commit()
+
+    batch = MagicMock(spec=BatchLLMClient)
+    batch.batch_chat = AsyncMock(
+        side_effect=[
+            [None],
+            [
+                {
+                    "thesis": "The higher-budget deterministic retry recovered the briefing.",
+                    "article_takeaways": [],
+                    "community_insights": [],
+                    "resources": [],
+                    "open_questions": [],
+                }
+            ],
+        ]
+    )
+    output = await InsightAgent(
+        LLMRouter(batch, MagicMock(spec=GroqClient)), provider="local"
+    ).run(StageContext("test", test_settings, db_session, "insights"))
+
+    assert output.processed == 1
+    assert output.failed == 0
+    assert batch.batch_chat.await_count == 2
+    first_call, retry_call = batch.batch_chat.await_args_list
+    assert first_call.kwargs["max_tokens"] == 1200
+    assert retry_call.kwargs["max_tokens"] == 1800
+    assert retry_call.kwargs["temperature"] == 0.0
+
+
+def test_insight_agent_rejects_unknown_provider():
+    with pytest.raises(ValueError, match="provider"):
+        InsightAgent(MagicMock(spec=LLMRouter), provider="unknown")
 
 
 def test_post_note_uses_briefing_and_article_summary():

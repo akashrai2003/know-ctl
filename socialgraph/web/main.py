@@ -113,8 +113,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return {"ok": False, "error": f"Post '{payload.urn}' not found"}
 
         merged_settings = await Settings.from_db(settings.db_path)
-        if not merged_settings.groq_api_key:
-            return {"ok": False, "error": "Configure a Groq API key before generating briefings"}
+        if not (
+            merged_settings.groq_api_key
+            or merged_settings.vllm_base_url
+            or merged_settings.vllm_batch_url
+        ):
+            return {
+                "ok": False,
+                "error": "Configure Groq or a local LLM before generating briefings",
+            }
 
         from socialgraph.agents.base import StageContext
         from socialgraph.agents.comment_rank_agent import CommentRankAgent

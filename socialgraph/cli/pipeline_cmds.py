@@ -287,8 +287,16 @@ def insights(
     limit: int = typer.Option(0, "--limit", "-n", help="Max posts to brief (0 = all missing)"),
     urn: str | None = typer.Option(None, "--urn", help="Brief a single post URN"),
     force: bool = typer.Option(False, "--force", help="Regenerate even if insight_json exists"),
+    provider: str = typer.Option(
+        "auto", "--provider", help="Briefing model provider: auto, groq, or local."
+    ),
+    local_model: str | None = typer.Option(
+        None,
+        "--local-model",
+        help="Override SG_VLLM_MODEL for this run (the model must be loaded by the server).",
+    ),
 ) -> None:
-    """Generate Groq briefings from post + article + useful comments."""
+    """Generate AI briefings from post + article + useful comments."""
     from socialgraph.agents.base import StageContext
     from socialgraph.agents.insight_agent import InsightAgent
 
@@ -299,12 +307,13 @@ def insights(
             limit=limit,
             force=force,
             urns=[urn] if urn else None,
+            provider=provider,
         )
         ctx = StageContext(run_id="cli-insights", settings=settings, db=session, stage="insights")
         out = await agent.run(ctx)
         typer.echo(f"Insights done: {out.processed} briefed, {out.failed} failed")
 
-    run_async(_run)
+    run_async(_run, vllm_model=local_model)
 
 
 def brief(

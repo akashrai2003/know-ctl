@@ -128,9 +128,21 @@ def run(
         "--headless/--no-headless",
         help="Run browser headless (no window) when running live. Default: headless.",
     ),
+    insights_provider: str = typer.Option(
+        "auto",
+        "--insights-provider",
+        help="Briefing model provider: auto, groq, or local.",
+    ),
+    local_model: str | None = typer.Option(
+        None,
+        "--local-model",
+        help="Override SG_VLLM_MODEL for this run (the model must be loaded by the server).",
+    ),
 ) -> None:
     """Run the complete pipeline (ingest → comments → rank → enrich → classify → insights → vault)."""
     settings = _get_settings()
+    if local_model:
+        settings.vllm_model = local_model
     _configure_logging(settings)
 
     runs_ingest = only == "ingest" or (
@@ -182,7 +194,7 @@ def run(
         agents["comment_enrich"] = CommentEnrichAgent(router=router)
         agents["enrich"] = EnrichAgent(router=router)
         agents["subtopic"] = SubtopicAgent(router=router)
-        agents["insights"] = InsightAgent(router=router)
+        agents["insights"] = InsightAgent(router=router, provider=insights_provider)
         if taxonomy:
             agents["classify"] = ClassifyAgent(router, taxonomy)
     orchestrator = PipelineOrchestrator(agents=agents, settings=settings, session_factory=factory)

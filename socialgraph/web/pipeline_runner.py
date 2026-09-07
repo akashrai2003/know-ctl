@@ -169,8 +169,7 @@ class PipelineRunner:
             }
             if router:
                 agents["subtopic"] = SubtopicAgent(router=router)
-                if router.groq_client is not None:
-                    agents["insights"] = InsightAgent(router=router)
+                agents["insights"] = InsightAgent(router=router)
                 if taxonomy:
                     agents["classify"] = ClassifyAgent(router, taxonomy)
 

@@ -244,8 +244,11 @@ Return JSON:
 Rules:
 - Prefer specific facts (50M tokens/day, 70B on 24GB, INT8 KV cache) over vague praise.
 - Drop marketing, CTAs, and "great share" even if they slipped in.
+- Keep the entire response concise enough to finish: at most 5 article_takeaways,
+  5 community_insights, 6 resources, and 3 open_questions. Each list item should
+  be one compact sentence except for the structured community/resource fields.
 - article_takeaways must come from the article text, not the post, and may be [].
 - community_insights must add something the post did not already say, and may be [].
-- resources should include the main article and any GitHub/docs/papers from comments.
+- resources should include the main article and the most useful GitHub/docs/papers from comments.
 - Never invent URLs or numbers that are not in the sources.
 """

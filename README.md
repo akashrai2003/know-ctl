@@ -173,6 +173,8 @@ sg classify                      # Categorize posts according to topic taxonomy
 sg embed                         # Compute vector embeddings for all posts
 sg subtopic                      # Detect granular subtopics per category
 sg insights                      # Generate missing/stale evidence-backed briefings
+sg insights --provider local     # Generate briefings entirely with the local model
+sg insights --provider local --local-model <served-model-id>  # Select Gemma/Qwen per run
 sg brief <urn>                   # Regenerate one briefing and one Obsidian note
 sg brief <urn> --fetch-comments  # Refresh its thread before briefing
 sg semantic-edges                # Build cosine similarity graph edges

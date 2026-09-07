@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `sg insights`, `sg rank-comments`, and targeted `sg brief <urn>` commands.
 - Dashboard briefing coverage, community-intelligence metrics, structured briefing views, and one-click regeneration.
 - MCP `get_briefing` tool for structured AI-agent retrieval.
+- Local-only, batched briefing generation with `sg insights --provider local` or `sg run --insights-provider local`.
 
 ### Fixed
 - Comment-scrape failures remain retryable instead of being recorded as successful empty threads.

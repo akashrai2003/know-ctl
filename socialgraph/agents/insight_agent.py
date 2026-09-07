@@ -24,6 +24,9 @@ logger = structlog.get_logger(__name__)
 
 UTC = timezone.utc
 INSIGHT_VERSION = 1
+LOCAL_INSIGHT_MAX_TOKENS = 1200
+LOCAL_INSIGHT_RETRY_MAX_TOKENS = 1800
+LOCAL_INSIGHT_RETRY_BATCH_SIZE = 4
 
 _INSIGHT_STATUSES = (
     PostStatus.CLASSIFIED.value,
@@ -43,18 +46,29 @@ class InsightAgent:
         force: bool = False,
         urns: list[str] | None = None,
         comment_limit: int = 12,
+        provider: str = "auto",
     ) -> None:
+        if provider not in {"auto", "groq", "local"}:
+            raise ValueError("provider must be one of: auto, groq, local")
         self._router = router
         self._limit = limit
         self._force = force
         self._urns = urns
         self._comment_limit = comment_limit
+        self._provider = provider
 
     async def run(self, ctx: StageContext) -> StageOutput:
         groq = self._router.groq_client
-        if groq is None:
-            logger.warning("insights.skip", reason="no groq client")
-            return StageOutput(stage=self.name, skipped=1, meta={"reason": "no groq client"})
+        local_available = bool(ctx.settings.vllm_base_url or ctx.settings.vllm_batch_url)
+        provider = self._provider
+        if provider == "auto":
+            provider = "groq" if groq is not None else "local"
+        if provider == "groq" and groq is None:
+            logger.warning("insights.skip", reason="no Groq client")
+            return StageOutput(stage=self.name, skipped=1, meta={"reason": "no Groq client"})
+        if provider == "local" and not local_available:
+            logger.warning("insights.skip", reason="no local LLM endpoint")
+            return StageOutput(stage=self.name, skipped=1, meta={"reason": "no local LLM endpoint"})
 
         q = (
             select(Post)
@@ -91,6 +105,16 @@ class InsightAgent:
                 meta={"reason": "no posts need insights", "cached": cached},
             )
 
+        logger.info(
+            "insights.start",
+            provider=provider,
+            candidates=len(candidates),
+            cached=cached,
+        )
+        if provider == "local":
+            return await self._run_local(ctx, candidates, cached)
+
+        assert groq is not None  # validated by the provider checks above
         processed = failed = 0
         checkpoint_size = max(1, ctx.settings.batch_size)
         for index, (post, payload, source_hash) in enumerate(candidates, start=1):
@@ -107,15 +131,10 @@ class InsightAgent:
                     {"type": "json_object"},
                     0.1,
                 )
-                insight = parse_insight(raw)
-                if insight is None:
+                if not _apply_insight(raw, post, source_hash):
                     failed += 1
                     logger.warning("insights.empty", urn=post.urn)
                     continue
-                insight = _ground_insight(insight, post)
-                post.insight_json = insight.to_json()
-                post.insight_source_hash = source_hash
-                post.insight_generated_at = datetime.now(UTC)
                 processed += 1
             except Exception as exc:
                 logger.error("insights.post_failed", urn=post.urn, error=str(exc))
@@ -138,8 +157,123 @@ class InsightAgent:
             processed=processed,
             skipped=cached,
             failed=failed,
-            meta={"cached": cached, "version": INSIGHT_VERSION},
+            meta={"cached": cached, "version": INSIGHT_VERSION, "provider": "groq"},
         )
+
+    async def _run_local(
+        self,
+        ctx: StageContext,
+        candidates: list[tuple[Post, dict[str, str], str]],
+        cached: int,
+    ) -> StageOutput:
+        """Generate briefings in efficient, resumable local-model batches."""
+        client = self._router.batch_client
+        batch_size = max(1, ctx.settings.batch_size)
+        processed = failed = 0
+        retry_candidates: list[tuple[Post, dict[str, str], str]] = []
+        total_batches = (len(candidates) + batch_size - 1) // batch_size
+
+        for batch_number, start in enumerate(range(0, len(candidates), batch_size), start=1):
+            batch = candidates[start : start + batch_size]
+            messages_list = [_insight_messages(payload) for _, payload, _ in batch]
+            try:
+                results = await client.batch_chat(
+                    messages_list,
+                    response_format={"type": "json_object"},
+                    temperature=0.1,
+                    max_tokens=LOCAL_INSIGHT_MAX_TOKENS,
+                )
+            except Exception as exc:
+                logger.error(
+                    "insights.local_batch_failed",
+                    batch=batch_number,
+                    error=str(exc),
+                )
+                results = []
+
+            for offset, (post, _, source_hash) in enumerate(batch):
+                raw = results[offset] if offset < len(results) else None
+                if _apply_insight(raw, post, source_hash):
+                    processed += 1
+                else:
+                    failed += 1
+                    retry_candidates.append(batch[offset])
+                    logger.warning("insights.empty", urn=post.urn, provider="local")
+
+            await ctx.db.commit()
+            logger.info(
+                "insights.progress",
+                provider="local",
+                batch=batch_number,
+                total_batches=total_batches,
+                completed=min(start + len(batch), len(candidates)),
+                total=len(candidates),
+                processed=processed,
+                failed=failed,
+            )
+
+        if retry_candidates:
+            logger.info(
+                "insights.local_retry_start",
+                candidates=len(retry_candidates),
+                max_tokens=LOCAL_INSIGHT_RETRY_MAX_TOKENS,
+            )
+            for start in range(0, len(retry_candidates), LOCAL_INSIGHT_RETRY_BATCH_SIZE):
+                retry_batch = retry_candidates[start : start + LOCAL_INSIGHT_RETRY_BATCH_SIZE]
+                try:
+                    results = await client.batch_chat(
+                        [_insight_messages(payload) for _, payload, _ in retry_batch],
+                        response_format={"type": "json_object"},
+                        temperature=0.0,
+                        max_tokens=LOCAL_INSIGHT_RETRY_MAX_TOKENS,
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "insights.local_retry_batch_failed",
+                        batch=(start // LOCAL_INSIGHT_RETRY_BATCH_SIZE) + 1,
+                        error=str(exc),
+                    )
+                    results = []
+
+                for offset, (post, _, source_hash) in enumerate(retry_batch):
+                    raw = results[offset] if offset < len(results) else None
+                    if _apply_insight(raw, post, source_hash):
+                        processed += 1
+                        failed -= 1
+                        logger.info("insights.local_retry_succeeded", urn=post.urn)
+                    else:
+                        logger.warning("insights.local_retry_failed", urn=post.urn)
+                await ctx.db.commit()
+
+        logger.info("insights.complete", provider="local", processed=processed, failed=failed)
+        return StageOutput(
+            stage=self.name,
+            processed=processed,
+            skipped=cached,
+            failed=failed,
+            meta={"cached": cached, "version": INSIGHT_VERSION, "provider": "local"},
+        )
+
+
+def _insight_messages(payload: dict[str, str]) -> list[dict[str, str]]:
+    return [
+        {"role": "system", "content": SYNTHESIZE_INSIGHTS_SYSTEM},
+        {
+            "role": "user",
+            "content": SYNTHESIZE_INSIGHTS_USER.format(**payload),
+        },
+    ]
+
+
+def _apply_insight(raw: object, post: Post, source_hash: str) -> bool:
+    insight = parse_insight(raw)
+    if insight is None:
+        return False
+    insight = _ground_insight(insight, post)
+    post.insight_json = insight.to_json()
+    post.insight_source_hash = source_hash
+    post.insight_generated_at = datetime.now(UTC)
+    return True
 
 
 def _build_prompt_payload(post: Post, comment_limit: int) -> dict[str, str]:
