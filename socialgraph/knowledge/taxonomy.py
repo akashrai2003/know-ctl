@@ -83,6 +83,5 @@ class Taxonomy:
     def as_prompt_list(self) -> str:
         """Format canonical topic names with the distinctions the classifier needs."""
         return "\n".join(
-            f"- {t.name}: {t.description}" if t.description else f"- {t.name}"
-            for t in self._topics
+            f"- {t.name}: {t.description}" if t.description else f"- {t.name}" for t in self._topics
         )

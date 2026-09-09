@@ -94,9 +94,7 @@ def test_topic_note_links_to_subtopic_note():
         name="AI Infrastructure",
         description="Serving systems",
         subtopic_groups={
-            "GPU Optimization": [
-                {"urn": "urn:li:activity:7501683033209516033", "content": "CUDA"}
-            ]
+            "GPU Optimization": [{"urn": "urn:li:activity:7501683033209516033", "content": "CUDA"}]
         },
         related_topics=[],
     )

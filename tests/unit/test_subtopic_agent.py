@@ -79,10 +79,6 @@ def test_subtopic_merge_guard_accepts_only_near_duplicate_names() -> None:
     assert _safe_subtopic_merge(
         "Reinforcement Learning", "Reinforcement Learning Algorithms", known
     )
-    assert _safe_subtopic_merge(
-        "Interview Preparation", "Interview Preparation Strategies", known
-    )
-    assert not _safe_subtopic_merge(
-        "Deep Learning Applications", "Time Series Forecasting", known
-    )
+    assert _safe_subtopic_merge("Interview Preparation", "Interview Preparation Strategies", known)
+    assert not _safe_subtopic_merge("Deep Learning Applications", "Time Series Forecasting", known)
     assert not _safe_subtopic_merge("Job Opportunities", "Remote Work Opportunities", known)

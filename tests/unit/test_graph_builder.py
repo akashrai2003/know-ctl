@@ -123,9 +123,7 @@ async def test_graph_build_replaces_stale_classification_edges(
     )
     await db_session.commit()
 
-    await GraphBuildAgent().run(
-        StageContext("test", test_settings, db_session, "graph_build")
-    )
+    await GraphBuildAgent().run(StageContext("test", test_settings, db_session, "graph_build"))
 
     current_node = await db_session.scalar(
         select(GraphNode).where(GraphNode.node_id == "ai_infrastructure")

@@ -79,8 +79,9 @@ def _sorted_post_entries(entries: list[dict]) -> list[dict]:
     minimum = datetime.min.replace(tzinfo=timezone.utc)
     return sorted(
         entries,
-        key=lambda entry: _activity_datetime(entry.get("urn", ""), entry.get("created_at"))
-        or minimum,
+        key=lambda entry: (
+            _activity_datetime(entry.get("urn", ""), entry.get("created_at")) or minimum
+        ),
         reverse=True,
     )
 
@@ -392,9 +393,7 @@ def render_topic_note(
     for subtopic_name, entries in sorted(subtopic_groups.items()):
         if subtopic_name:
             subtopic_file = f"{slug}__{_slug(subtopic_name)}"
-            subtopic_lines.append(
-                f"- [[{subtopic_file}|{subtopic_name}]] — {len(entries)} posts"
-            )
+            subtopic_lines.append(f"- [[{subtopic_file}|{subtopic_name}]] — {len(entries)} posts")
         else:
             direct_entries = entries  # posts with no subtopic
 

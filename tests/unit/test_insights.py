@@ -198,9 +198,9 @@ async def test_local_insights_retry_malformed_outputs(db_session: AsyncSession, 
             ],
         ]
     )
-    output = await InsightAgent(
-        LLMRouter(batch, MagicMock(spec=GroqClient)), provider="local"
-    ).run(StageContext("test", test_settings, db_session, "insights"))
+    output = await InsightAgent(LLMRouter(batch, MagicMock(spec=GroqClient)), provider="local").run(
+        StageContext("test", test_settings, db_session, "insights")
+    )
 
     assert output.processed == 1
     assert output.failed == 0
