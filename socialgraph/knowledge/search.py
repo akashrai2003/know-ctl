@@ -78,11 +78,27 @@ def get_local_model(model_name: str, device: str):
             model_name=model_name,
             device=resolved_device,
         )
-        _local_model = SentenceTransformer(
-            model_name,
-            device=resolved_device,
-            trust_remote_code=True,
-        )
+        try:
+            _local_model = SentenceTransformer(
+                model_name,
+                device=resolved_device,
+                trust_remote_code=True,
+            )
+        except Exception as exc:
+            if resolved_device != "cpu" and ("out of memory" in str(exc).lower() or "cuda" in str(exc).lower()):
+                logger.warning(
+                    "local_embedding.cuda_oom_falling_back_to_cpu",
+                    error=str(exc),
+                )
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                _local_model = SentenceTransformer(
+                    model_name,
+                    device="cpu",
+                    trust_remote_code=True,
+                )
+            else:
+                raise
     return _local_model
 
 
@@ -92,7 +108,20 @@ async def embed_texts_local(texts: list[str], model_name: str, device: str) -> l
 
     def _encode() -> list[list[float]]:
         model = get_local_model(model_name, device)
-        embeddings = model.encode(texts)
+        try:
+            embeddings = model.encode(texts)
+        except Exception as exc:
+            if "out of memory" in str(exc).lower() or "cuda" in str(exc).lower():
+                import torch
+                from sentence_transformers import SentenceTransformer
+                global _local_model
+                logger.warning("local_embedding.cuda_encode_oom_falling_back_to_cpu", error=str(exc))
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                _local_model = SentenceTransformer(model_name, device="cpu", trust_remote_code=True)
+                embeddings = _local_model.encode(texts)
+            else:
+                raise
         if hasattr(embeddings, "tolist"):
             return embeddings.tolist()
         return [list(emb) for emb in embeddings]
