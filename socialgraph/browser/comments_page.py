@@ -42,7 +42,7 @@ class CommentsPage:
                     await asyncio.sleep(0.5)
 
             # Initial scroll to comments section anchor
-            await self.page.evaluate('''() => {
+            await self.page.evaluate("""() => {
                 const anchor = document.querySelector(
                     '[componentkey*="commentsSectionAnchorRef"], [data-component-type="LazyColumn"], [data-placeholder*="comment"]'
                 );
@@ -51,7 +51,7 @@ class CommentsPage:
                     const main = document.querySelector('main') || document.documentElement;
                     main.scrollTop = Math.min(1500, main.scrollHeight);
                 }
-            }''')
+            }""")
             await asyncio.sleep(1.5)
 
             # ── Step 1: load top-level comments by scrolling & clicking more ──────
@@ -69,13 +69,13 @@ class CommentsPage:
 
             for _ in range(max_scroll_rounds):
                 # Check visible comments (supports both modern SDUI and legacy)
-                visible_count = await self.page.evaluate('''() => {
+                visible_count = await self.page.evaluate("""() => {
                     const sdui = document.querySelectorAll(
                         '[componentkey^="CommentComponentReference_"], [componentkey*="urn:li:comment"]'
                     );
                     if (sdui.length > 0) return sdui.length;
                     return document.querySelectorAll('article.comments-comment-entity, .comments-comment-item').length;
-                }''')
+                }""")
 
                 if visible_count >= max_per_post:
                     break
@@ -88,10 +88,10 @@ class CommentsPage:
                         await asyncio.sleep(1.0)
 
                 # Scroll the scrollable container (LinkedIn uses <main> with overflow-y: auto)
-                await self.page.evaluate('''() => {
+                await self.page.evaluate("""() => {
                     const main = document.querySelector('main') || document.documentElement;
                     main.scrollTop = main.scrollHeight;
-                }''')
+                }""")
                 await asyncio.sleep(1.2)
 
                 if visible_count == prev_count:
@@ -108,7 +108,7 @@ class CommentsPage:
             # In legacy UI, they are <button> elements with aria-label.
             max_reply_rounds = 5
             for _ in range(max_reply_rounds):
-                clicked_count = await self.page.evaluate('''() => {
+                clicked_count = await self.page.evaluate("""() => {
                     let clicked = 0;
                     // SDUI: elements with componentkey containing LoadMoreReplies
                     const sdui = Array.from(document.querySelectorAll('[componentkey*="LoadMoreReplies" i]'));
@@ -133,7 +133,7 @@ class CommentsPage:
                         }
                     }
                     return clicked;
-                }''')
+                }""")
 
                 # Legacy fallback buttons
                 legacy_reply_sel = (
@@ -154,7 +154,7 @@ class CommentsPage:
                 await asyncio.sleep(1.0)
 
             # ── Step 3: expand truncated comment bodies ("… more") ───────────
-            await self.page.evaluate('''() => {
+            await self.page.evaluate("""() => {
                 document.querySelectorAll('button, span[role="button"]').forEach(b => {
                     const txt = (b.innerText || '').trim();
                     const aria = (b.getAttribute('aria-label') || '').toLowerCase();
@@ -162,7 +162,7 @@ class CommentsPage:
                         try { b.click(); } catch(e) {}
                     }
                 });
-            }''')
+            }""")
 
             # Also check legacy see-more buttons
             see_more_sel = (

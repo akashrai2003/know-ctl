@@ -85,7 +85,9 @@ def get_local_model(model_name: str, device: str):
                 trust_remote_code=True,
             )
         except Exception as exc:
-            if resolved_device != "cpu" and ("out of memory" in str(exc).lower() or "cuda" in str(exc).lower()):
+            if resolved_device != "cpu" and (
+                "out of memory" in str(exc).lower() or "cuda" in str(exc).lower()
+            ):
                 logger.warning(
                     "local_embedding.cuda_oom_falling_back_to_cpu",
                     error=str(exc),
@@ -114,8 +116,11 @@ async def embed_texts_local(texts: list[str], model_name: str, device: str) -> l
             if "out of memory" in str(exc).lower() or "cuda" in str(exc).lower():
                 import torch
                 from sentence_transformers import SentenceTransformer
+
                 global _local_model
-                logger.warning("local_embedding.cuda_encode_oom_falling_back_to_cpu", error=str(exc))
+                logger.warning(
+                    "local_embedding.cuda_encode_oom_falling_back_to_cpu", error=str(exc)
+                )
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
                 _local_model = SentenceTransformer(model_name, device="cpu", trust_remote_code=True)
