@@ -40,11 +40,12 @@ class CommentAgent:
 
         if self._urns:
             posts = await repo.get_posts_by_urns(self._urns)
+            posts = [p for p in posts if p.platform == "linkedin"]
             if not self._force:
                 posts = [p for p in posts if not p.comments_fetched]
         else:
             posts = await repo.get_posts_for_comments(
-                limit=self._limit, include_fetched=self._force
+                limit=self._limit, include_fetched=self._force, platform="linkedin"
             )
 
         if self._force and posts:
@@ -124,3 +125,6 @@ class CommentAgent:
                 "scan_limit_per_post": self._max_per_post,
             },
         )
+
+
+LinkedInCommentAgent = CommentAgent

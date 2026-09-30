@@ -238,7 +238,8 @@ tags:
             body += "\n"
 
     if source_url:
-        body += f"\n[View on LinkedIn]({source_url})\n"
+        platform_label = platform.title()
+        body += f"\n[View on {platform_label}]({source_url})\n"
 
     if comments:
         body += "\n## Thread\n"

@@ -242,6 +242,10 @@ app.command(name="brief")(pipeline_cmds.brief)
 app.command(name="embed")(pipeline_cmds.embed)
 app.command(name="semantic-edges")(pipeline_cmds.semantic_edges)
 
+# Reddit-specific commands
+app.command(name="reddit-ingest")(pipeline_cmds.reddit_ingest)
+app.command(name="reddit-comments")(pipeline_cmds.reddit_comments)
+
 app.command(name="search")(search_cmds.search)
 app.command(name="similar")(search_cmds.similar)
 

@@ -56,6 +56,8 @@ SECRET_KEYS = {
     "linkedin_password",
     "linkedin_cookie",
     "vllm_api_key",
+    "reddit_client_secret",
+    "reddit_password",
 }
 
 
@@ -202,6 +204,11 @@ SETTINGS_KEYS = [
     "linkedin_email",
     "linkedin_password",
     "linkedin_cookie",
+    # Reddit
+    "reddit_client_id",
+    "reddit_client_secret",
+    "reddit_username",
+    "reddit_password",
     # Pipeline
     "batch_size",
     "llm_timeout",

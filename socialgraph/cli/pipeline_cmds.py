@@ -429,3 +429,60 @@ def semantic_edges(
         typer.echo(f"Semantic edges done: {out.processed} edges created, {out.failed} failed")
 
     run_async(_run)
+
+
+# ── Reddit ────────────────────────────────────────────────────────────────────
+
+
+def reddit_ingest() -> None:
+    """Ingest saved posts from Reddit via OAuth API.
+
+    Fetches up to 1,000 saved submissions and comments (Reddit API limit).
+    Saved comments are resolved to their parent submission automatically.
+    """
+    from socialgraph.agents.base import StageContext
+    from socialgraph.agents.reddit_ingest_agent import RedditIngestAgent
+
+    async def _run(settings: Any, session: Any) -> None:
+        agent = RedditIngestAgent()
+        ctx = StageContext(
+            run_id="cli-reddit-ingest", settings=settings, db=session, stage="ingest"
+        )
+        out = await agent.run(ctx)
+        typer.echo(f"Reddit ingest: {out.processed} new, {out.skipped} skipped")
+
+    run_async(_run)
+
+
+def reddit_comments(
+    limit: int = typer.Option(0, "--limit", "-n", help="Max posts to fetch comments for (0 = all)"),
+    force: bool = typer.Option(False, "--force", help="Re-fetch even if already fetched"),
+    max_per_post: int = typer.Option(
+        -1,
+        "--max-per-post",
+        help="Max comments to fetch per post (-1 = use SG_MAX_COMMENTS from env)",
+    ),
+    urn: str | None = typer.Option(None, "--urn", help="Fetch comments for a single post URN"),
+) -> None:
+    """Fetch Reddit comments for saved submissions via API."""
+    from socialgraph.agents.base import StageContext
+    from socialgraph.agents.reddit_comment_agent import RedditCommentAgent
+
+    async def _run(settings: Any, session: Any) -> None:
+        effective_max = max_per_post if max_per_post >= 0 else settings.max_comments
+        agent = RedditCommentAgent(
+            limit=limit,
+            force=force,
+            max_per_post=effective_max,
+            urns=[urn] if urn else None,
+        )
+        ctx = StageContext(
+            run_id="cli-reddit-comments", settings=settings, db=session, stage="comments"
+        )
+        out = await agent.run(ctx)
+        typer.echo(
+            f"Reddit comments: {out.processed} posts, "
+            f"{out.meta.get('total_comments', 0)} comments fetched"
+        )
+
+    run_async(_run)

@@ -85,13 +85,19 @@ class Repo:
         result = await self._session.scalars(select(Post).where(Post.status == status))
         return list(result.all())
 
-    async def get_all_posts(self) -> list[Post]:
+    async def get_all_posts(self, platform: str | None = None) -> list[Post]:
         """Fetch all posts in the database.
+
+        Args:
+            platform: If given, filter to posts from this platform only.
 
         Returns:
             A list of all Post instances.
         """
-        result = await self._session.scalars(select(Post))
+        q = select(Post)
+        if platform:
+            q = q.where(Post.platform == platform)
+        result = await self._session.scalars(q)
         return list(result.all())
 
     async def count_posts_by_status(self) -> dict[str, int]:
@@ -490,12 +496,14 @@ class Repo:
     # ── Comment ───────────────────────────────────────────────────────────
 
     async def get_posts_for_comments(
-        self, limit: int = 0, *, include_fetched: bool = False
+        self, limit: int = 0, *, include_fetched: bool = False, platform: str | None = None
     ) -> list[Post]:
         """Fetch eligible posts for comment collection.
 
         Args:
             limit: Maximum number of posts to fetch (0 for unlimited).
+            include_fetched: If True, include posts that already have comments.
+            platform: If given, filter to posts from this platform only.
 
         Returns:
             A list of Post instances.
@@ -505,6 +513,8 @@ class Repo:
                 ["pending", "ingested", "ok", "graphed", "enriched", "classified", "failed"]
             )
         )
+        if platform:
+            q = q.where(Post.platform == platform)
         if not include_fetched:
             q = q.where(Post.comments_fetched == False)  # noqa: E712
         if limit:

@@ -66,6 +66,7 @@ BLOCKED_URL_PATTERNS = [
     "t.co",
     "facebook.com",
     "instagram.com",
+    "reddit.com/r/",  # thread pages — we have the API data; don't web-scrape
 ]
 
 # Strip trailing punctuation that regex grabs from sentence context

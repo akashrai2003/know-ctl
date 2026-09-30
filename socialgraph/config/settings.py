@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     linkedin_password: str = Field(default="")
     linkedin_cookie: str = Field(default="", description="LinkedIn li_at session cookie")
 
+    # ── Reddit API credentials ───────────────────────────────────────────
+    reddit_client_id: str = Field(default="", description="Reddit OAuth app client ID")
+    reddit_client_secret: str = Field(default="", description="Reddit OAuth app client secret")
+    reddit_username: str = Field(default="", description="Reddit username")
+    reddit_password: str = Field(default="", description="Reddit account password")
+
     # ── Paths ────────────────────────────────────────────────────────────
     db_path: Path = Field(default=Path(".socialgraph/socialgraph.db"))
     workspace_dir: Path = Field(default=Path(".socialgraph"))

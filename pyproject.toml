@@ -45,6 +45,9 @@ dependencies = [
     "playwright>=1.44",
     "playwright-stealth",
 
+    # Reddit API
+    "asyncpraw>=7.7",
+
     # Content extraction
     "trafilatura>=1.10",
     "beautifulsoup4>=4.12",
