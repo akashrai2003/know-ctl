@@ -12,10 +12,11 @@ To start the server:
 sg web
 ```
 * **Default URL**: [http://localhost:8080](http://localhost:8080) (it will automatically open in your default browser).
-* **Custom Port**: To run on a different port:
+* **Custom Port**: To run on a different port (e.g. port 3000 if Bonsai `llama-server` is running on 8080):
   ```bash
-  sg web --port 8080 --no-open
+  sg web --port 3000 --no-open
   ```
+  *(See [BONSAI_SETUP.md](BONSAI_SETUP.md) for running 27B local LLM on 8GB VRAM).*
 
 ---
 

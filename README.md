@@ -24,7 +24,7 @@ The project includes a web application with an onboarding wizard, interactive se
 - **Encrypted Local Storage**: Machine-derived Fernet AES encryption stores credentials securely in local SQLite (`.socialgraph/socialgraph.db`).
 - **Multi-Platform Architecture**: Platform-partitioned knowledge storage (`linkedin/`, `reddit/`, `x/`) unified by cross-platform topic taxonomies and semantic search.
 - **Hybrid LLM Pipeline**:
-  - **Local Models** (vLLM, llama.cpp, Ollama, LM Studio): High-throughput article summaries, ambiguous-comment ranking, context-aware classification, and subtopic detection. The client automatically detects batch support and falls back to concurrent requests.
+  - **Local 27B Reasoning on 8GB VRAM (Bonsai 2)**: Run full 27B reasoning models locally on consumer laptops (RTX 3070/4060, Apple Silicon) with ~5.6 GB ternary weights (`PTQ1_0`), 24k context window, and FlashAttention via PrismML's `llama-server`. Also supports standard OpenAI-compatible servers (vLLM, llama.cpp, Ollama, LM Studio).
   - **Groq API**: Cross-source reasoning over the post, article, and thread to produce structured briefings with a thesis, takeaways, community claims, resources, and open questions. Groq also provides a functional fallback when no local model is configured.
 - **Dual Ingestion Modes**: Upload official data archive JSON exports or live-scrape posts and comments using Playwright (credentials or session cookie).
 - **Comment Intelligence**: Scans up to 80 comments by default, expands long bodies and replies, scores information value, and filters applause or promotional noise before synthesis.
@@ -141,9 +141,75 @@ Saved posts
 
 | Component | Responsibility | Recommended Model | Mode |
 |:---|:---|:---|:---|
-| **Groq API** | Multi-source briefing synthesis and difficult fallbacks | `llama-3.3-70b-versatile` with configured fallbacks | Cloud API |
-| **Local Model** | Article summaries, comment ranking, classification, title and subtopic generation | `Qwen/Qwen3.5-9B-FP8` | Batch / Async |
+| **Local Model (27B)** | Article summaries, comment ranking, classification, title/subtopic generation, local briefings | **Bonsai 2 27B** (`Ternary-Bonsai-2-27B-PTQ1_0`) — *Runs on 8GB VRAM* or `Qwen/Qwen3.5-9B-FP8` | Local (CUDA / Metal / CPU) |
+| **Groq API** | Cloud multi-source briefing synthesis and fast fallbacks | `llama-3.3-70b-versatile` / `qwen/qwen3.8-27b` | Cloud API |
 | **Local Embeddings** | Vector similarity & cosine graph edges | `Qwen/Qwen3-Embedding-0.6B` | Local (CUDA/CPU) |
+
+---
+
+## 💻 Local 27B AI on 8GB VRAM (Bonsai 2 Integration)
+
+Social Graph natively supports running **27-billion parameter reasoning models 100% locally on standard 8GB VRAM consumer laptops and GPUs** via [Bonsai 2](https://github.com/PrismML-Eng/Bonsai-demo).
+
+By using ternary-weight quantization (`PTQ1_0` at 1.75 bits per weight), the entire 27B model weighs only **5.6 GB** while retaining **98.2% of FP16 intelligence**. Combined with FlashAttention and 8-bit quantized KV caching, you can run a **24,576 token context window** completely inside 8GB VRAM with zero cloud API dependencies.
+
+### 1. Launch Bonsai 2 Local Server
+
+Clone the [Bonsai-demo](https://github.com/PrismML-Eng/Bonsai-demo) repository and run its setup:
+
+```bash
+git clone https://github.com/PrismML-Eng/Bonsai-demo.git
+cd Bonsai-demo
+./setup.sh
+```
+
+Launch the CUDA `llama-server` (tuned for 8GB VRAM):
+
+```bash
+cd ~/Desktop/Bonsai-demo
+
+./bin/cuda/llama-server \
+  -m models/bonsai2-gguf/27B/Ternary-Bonsai-2-27B-PTQ1_0.gguf \
+  -ngl 99 \
+  -c 24576 \
+  -fa on \
+  --cache-type-k q8_0 \
+  --cache-type-v q8_0 \
+  --jinja \
+  --reasoning-effort medium \
+  --reasoning-format auto \
+  --host 0.0.0.0 \
+  --port 8080
+```
+
+### 2. Connect Social Graph
+
+In `.env` (or via **Web UI -> Settings -> Local Model Server**):
+
+```env
+SG_VLLM_BASE_URL=http://127.0.0.1:8080
+SG_VLLM_MODEL=models/bonsai2-gguf/27B/Ternary-Bonsai-2-27B-PTQ1_0.gguf
+# Avoid port collision with llama-server on 8080:
+SG_WEB_PORT=3000
+```
+
+### 3. Run Pipeline with 100% Local Inference
+
+```bash
+# Run local post categorization
+sg classify --force
+
+# Generate granular subtopics
+sg subtopic --force
+
+# Synthesize full AI briefings locally (no cloud API needed!)
+sg insights --provider local
+
+# Launch Web UI on port 3000
+sg web --port 3000
+```
+
+> 📖 **Full Guide**: See [BONSAI_SETUP.md](BONSAI_SETUP.md) for detailed memory budgets, Apple Silicon instructions, and performance optimization tips.
 
 ---
 
@@ -209,8 +275,8 @@ Settings can be managed in **Web UI -> Settings** or set in `.env`:
 |:---|:---|:---|:---|
 | **Groq API Key** | `SG_GROQ_API_KEY` | `""` | Required for briefing synthesis |
 | **Groq Model** | `SG_GROQ_MODEL` | `llama-3.3-70b-versatile` | Primary reasoning model |
-| **Local Model URL** | `SG_VLLM_BASE_URL` | `""` | Local OpenAI-compatible server URL |
-| **Local Model ID** | `SG_VLLM_MODEL` | `Qwen/Qwen3.5-9B-FP8` | Model ID for classification |
+| **Local Model URL** | `SG_VLLM_BASE_URL` | `""` | Local OpenAI-compatible server URL (e.g. `http://127.0.0.1:8080`) |
+| **Local Model ID** | `SG_VLLM_MODEL` | `Qwen/Qwen3.5-9B-FP8` | Model ID (e.g. `models/bonsai2-gguf/27B/Ternary-Bonsai-2-27B-PTQ1_0.gguf`) |
 | **Embedding Model** | `SG_EMBEDDING_MODEL` | `Qwen/Qwen3-Embedding-0.6B` | Sentence-transformers model |
 | **Embedding Device** | `SG_EMBEDDING_DEVICE` | `cuda` | `cuda`, `cpu`, or `mps` |
 | **LinkedIn Email** | `SG_LINKEDIN_EMAIL` | `""` | Account email for live scraping |
@@ -239,7 +305,9 @@ know-ctl/
 ├── tests/               # Pytest suite (unit, API, integration)
 ├── vault/               # Generated Obsidian knowledge vault (git-ignored)
 ├── .socialgraph/        # Application database and logs (git-ignored)
+├── BONSAI_SETUP.md      # Running 27B local LLM on 8GB VRAM laptops
 ├── SETUP.md             # In-depth credential and cookie setup guide
+├── RUNBOOK.md           # Operational commands and execution guide
 └── pyproject.toml       # Project metadata, dependencies, and tools
 ```
 

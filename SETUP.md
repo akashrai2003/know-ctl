@@ -72,17 +72,39 @@ If you prefer not to log in with browser automation, you can download your saved
 
 ---
 
-### D. Local LLM / vLLM Server (Optional)
+### D. Local LLM Server & Bonsai 2 (27B on 8GB VRAM)
 
-Social Graph supports any OpenAI-compatible server for batch post classification and topic mapping (e.g. `Qwen/Qwen3.5-9B-FP8`).
+Social Graph supports any OpenAI-compatible server for batch post classification, topic mapping, and 100% local AI briefings.
 
 Supported backends:
-- **vLLM** (Supports `/v1/chat/completions/batch` for maximum throughput)
-- **llama.cpp / Ollama / LM Studio** (Auto-detected: if `/batch` is absent, Social Graph seamlessly uses concurrent async requests)
+- **Bonsai 2 27B (`llama-server`)**: **Recommended for consumer laptops & 8GB VRAM cards**. Delivers full 27B-parameter reasoning at ~5.6 GB VRAM using ternary quantization (`PTQ1_0`), 24k context window, and FlashAttention. (See [BONSAI_SETUP.md](BONSAI_SETUP.md)).
+- **vLLM**: Supports native `/v1/chat/completions/batch` for high-throughput batching on datacenter GPUs.
+- **llama.cpp / Ollama / LM Studio**: Auto-detected: if `/batch` is absent, Social Graph seamlessly uses concurrent async requests.
 
-In Web UI **Settings** → **Local Model Server**:
-- **Base URL**: e.g., `http://localhost:8000` or an ngrok/cloud URL.
-- **Model ID**: The exact model identifier registered on your server (e.g., `Qwen/Qwen3.5-9B-FP8`).
+#### Recommended Local 27B Setup (Bonsai-demo):
+```bash
+cd ~/Desktop/Bonsai-demo
+./bin/cuda/llama-server \
+  -m models/bonsai2-gguf/27B/Ternary-Bonsai-2-27B-PTQ1_0.gguf \
+  -ngl 99 -c 24576 -fa on \
+  --cache-type-k q8_0 --cache-type-v q8_0 \
+  --jinja --reasoning-effort medium --reasoning-format auto \
+  --host 0.0.0.0 --port 8080
+```
+
+#### Social Graph Configuration:
+In Web UI **Settings** → **Local Model Server** (or `.env`):
+- **Base URL**: `http://127.0.0.1:8080`
+- **Model ID**: `models/bonsai2-gguf/27B/Ternary-Bonsai-2-27B-PTQ1_0.gguf`
+
+> [!IMPORTANT]
+> If `llama-server` is running on port `8080`, start the Social Graph Web UI on port `3000` to avoid port collisions:
+> ```bash
+> sg web --port 3000
+> ```
+> Or set `SG_WEB_PORT=3000` in `.env`.
+
+For a full step-by-step walkthrough, memory budgets, and Apple Silicon tips, refer to [BONSAI_SETUP.md](BONSAI_SETUP.md).
 
 ---
 
