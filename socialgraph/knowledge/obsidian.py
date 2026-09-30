@@ -238,7 +238,8 @@ tags:
             body += "\n"
 
     if source_url:
-        platform_label = platform.title()
+        _display_names = {"linkedin": "LinkedIn", "reddit": "Reddit"}
+        platform_label = _display_names.get(platform.lower(), platform.title())
         body += f"\n[View on {platform_label}]({source_url})\n"
 
     if comments:
